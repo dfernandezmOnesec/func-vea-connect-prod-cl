@@ -186,7 +186,8 @@ El bot utiliza Event Grid para recibir eventos de WhatsApp desde ACS:
 3. **Configurar variables de entorno:**
    ```bash
    cp local.settings.json.example local.settings.json
-   # Editar local.settings.json con tus credenciales
+   # Editar local.settings.json con tus credenciales reales
+   # ⚠️ IMPORTANTE: Nunca subas local.settings.json al repositorio
    ```
 
 4. **Ejecutar tests:**
@@ -247,6 +248,38 @@ POST /api/send-message
   "message": "Hello from the bot!"
 }
 ```
+
+## Seguridad
+
+### ⚠️ Protección de Secretos
+
+**NUNCA** subas archivos con secretos reales al repositorio:
+
+- ✅ `local.settings.json.example` - Archivo de ejemplo (sin secretos reales)
+- ❌ `local.settings.json` - Archivo con secretos reales (incluido en .gitignore)
+- ❌ `.env` - Archivo de variables de entorno (incluido en .gitignore)
+
+### Si accidentalmente subiste secretos:
+
+1. **Inmediatamente** revoca las claves comprometidas en Azure Portal
+2. **Genera nuevas claves** para todos los servicios
+3. **Actualiza** tu `local.settings.json` con las nuevas claves
+4. **Contacta** al administrador del repositorio para limpiar el historial
+
+### Variables de Entorno Seguras
+
+Para desarrollo local, usa `local.settings.json`:
+```json
+{
+  "IsEncrypted": false,
+  "Values": {
+    "AZURE_OPENAI_API_KEY": "tu-clave-real-aqui",
+    "AZURE_STORAGE_CONNECTION_STRING": "tu-connection-string-real"
+  }
+}
+```
+
+Para producción, configura las variables en Azure Function App Settings.
 
 ## Tests
 
