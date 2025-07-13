@@ -1,0 +1,21 @@
+{
+  "exclude": [
+    "**/venv",
+    "**/__pycache__",
+    "**/.pytest_cache",
+    "**/node_modules",
+    "**/.git"
+  ],
+  "reportMissingImports": true,
+  "reportMissingModuleSource": false,
+  "reportMissingTypeStubs": false,
+  "reportUnusedImport": false,
+  "reportUnusedClass": false,
+  "reportUnusedFunction": false,
+  "reportUnusedVariable": false,
+  "pythonVersion": "3.10",
+  "typeCheckingMode": "basic",
+  "useLibraryCodeForTypes": true,
+  "venvPath": ".",
+  "venv": "venv"
+} 

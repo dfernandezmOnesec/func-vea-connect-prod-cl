@@ -1,0 +1,10 @@
+{
+  "scriptFile": "../whatsapp_bot_function.py",
+  "bindings": [
+    {
+      "type": "eventGridTrigger",
+      "name": "event",
+      "direction": "in"
+    }
+  ]
+} 

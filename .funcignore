@@ -1,0 +1,57 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Testing
+tests/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Development
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Documentation
+docs/
+*.md
+!README.md
+
+# Configuration files
+.env
+.env.local
+.env.development
+.env.test
+.env.production
+local.settings.json
+
+# Logs
+*.log
+logs/
+
+# Git
+.git/
+.gitignore
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Azure Functions
+.azure/
+.vscode/
+local.settings.json
+
+# Dependencies (will be installed in Azure)
+node_modules/ 
