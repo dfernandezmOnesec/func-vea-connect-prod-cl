@@ -12,16 +12,13 @@ class TestRedisService:
     
     def setup_method(self):
         """Set up test fixtures."""
-        with patch('services.redis_service.Redis') as mock_redis:
-            with patch('services.redis_service.settings') as mock_settings:
-                mock_settings.redis_connection_string = "redis://localhost:6379"
-                mock_settings.redis_cache_ttl = 3600
-                mock_settings.embedding_cache_ttl = 86400
-                
-                self.mock_redis_client = Mock()
-                mock_redis.from_url.return_value = self.mock_redis_client
-                
-                self.service = RedisService()
+        with patch('services.redis_service.settings') as mock_settings:
+            mock_settings.redis_connection_string = "redis://localhost:6379"
+            mock_settings.redis_cache_ttl = 3600
+            mock_settings.embedding_cache_ttl = 86400
+
+            self.mock_redis_client = Mock()
+            self.service = RedisService(redis_client=self.mock_redis_client)
     
     def test_init_success(self):
         """Test successful initialization."""
@@ -283,7 +280,7 @@ class TestRedisService:
             result = self.service.set_conversation_context(user_id, context)
             
             assert result is True
-            mock_set_json.assert_called_once_with(f"conv_{user_id}", context, 3600)
+            mock_set_json.assert_called_once_with(f"conversation:{user_id}", context)
     
     def test_set_conversation_context_failure(self):
         """Test conversation context set operation failure."""
@@ -318,7 +315,7 @@ class TestRedisService:
             
             result = self.service.get_conversation_context(user_id)
             
-            assert result is None
+            assert result == []
     
     def test_clear_conversation_context_success(self):
         """Test successful conversation context clear operation."""
@@ -330,7 +327,7 @@ class TestRedisService:
             result = self.service.clear_conversation_context(user_id)
             
             assert result is True
-            mock_delete.assert_called_once_with(f"conv_{user_id}")
+            mock_delete.assert_called_once_with(f"conversation:{user_id}")
     
     def test_clear_conversation_context_failure(self):
         """Test conversation context clear operation failure."""

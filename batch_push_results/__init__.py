@@ -19,6 +19,8 @@ from services.redis_service import redis_service
 from services.computer_vision_service import computer_vision_service
 from core.document_processor import DocumentProcessor
 
+# Configuración de logging global
+logging.basicConfig(level=getattr(logging, settings.log_level.upper(), logging.INFO))
 logger = logging.getLogger(__name__)
 
 
@@ -29,6 +31,7 @@ def main(msg: func.QueueMessage) -> None:
     Args:
         msg: The queue message containing file information.
     """
+    logger.info("[AUDIT] Entró a batch_push_results.main")
     try:
         # Parse queue message
         message_body = msg.get_body().decode('utf-8')

@@ -249,6 +249,45 @@ class EmbeddingManager:
         if not all(isinstance(x, (int, float)) for x in embedding):
             return False
         
+        return True
+    
+    def delete_document_embeddings(self, document_id: str) -> bool:
+        """
+        Eliminar embeddings y metadatos de un documento.
+        
+        Args:
+            document_id: ID del documento a eliminar
+            
+        Returns:
+            True si se eliminaron correctamente
+        """
+        try:
+            # Eliminar embeddings del documento
+            embedding_keys = [
+                f"embedding:{document_id}",
+                f"document_metadata:{document_id}",
+                f"document_chunks:{document_id}"
+            ]
+            
+            success = True
+            for key in embedding_keys:
+                if not self.redis_service.delete(key):
+                    logger.warning(f"No se pudo eliminar la clave Redis: {key}")
+                    success = False
+                else:
+                    logger.debug(f"Clave Redis eliminada: {key}")
+            
+            if success:
+                logger.info(f"Embeddings eliminados para documento: {document_id}")
+            else:
+                logger.warning(f"Eliminación parcial de embeddings para documento: {document_id}")
+            
+            return success
+            
+        except Exception as e:
+            logger.error(f"Error al eliminar embeddings del documento {document_id}: {e}")
+            return False
+        
         # Verificar que no esté vacío y tenga dimensiones razonables
         if len(embedding) == 0 or len(embedding) > 10000:
             return False

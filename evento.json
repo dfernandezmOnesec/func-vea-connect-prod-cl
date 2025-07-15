@@ -1,0 +1,18 @@
+[
+    {
+      "id": "1234-1234-1234",
+      "eventType": "Microsoft.Communication.AdvancedMessageReceived",
+      "subject": "whatsapp/test",
+      "eventTime": "2024-07-14T00:00:00.000Z",
+      "data": {
+        "from": { "phoneNumber": "+521234567890" },
+        "message": { "content": "¡Hola desde Event Grid!" },
+        "id": "msg-001",
+        "receivedTimestamp": "2024-07-14T00:00:00.000Z",
+        "channelType": "whatsapp"
+      },
+      "dataVersion": "1.0",
+      "metadataVersion": "1",
+      "topic": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/test/providers/Microsoft.EventGrid/topics/test"
+    }
+  ]

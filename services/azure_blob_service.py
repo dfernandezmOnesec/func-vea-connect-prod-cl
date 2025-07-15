@@ -93,7 +93,7 @@ class AzureBlobService:
                 if not self._initialized:
                     logger.warning("Azure Blob Storage no disponible")
                     return False
-                    
+            assert self._container_client is not None
             blob_client = self._container_client.get_blob_client(blob_name)
             blob_client.upload_blob(text, overwrite=True, metadata=metadata)
             logger.debug(f"Texto subido como blob: {blob_name}")
@@ -137,7 +137,7 @@ class AzureBlobService:
                 if not self._initialized or self._container_client is None:
                     logger.warning("Azure Blob Storage no disponible")
                     return None
-                    
+            assert self._container_client is not None
             blob_client = self._container_client.get_blob_client(blob_name)
             download_stream = blob_client.download_blob()
             text = download_stream.readall().decode('utf-8')
@@ -177,6 +177,7 @@ class AzureBlobService:
             True si se eliminó correctamente
         """
         try:
+            assert self._container_client is not None
             blob_client = self._container_client.get_blob_client(blob_name)
             blob_client.delete_blob()
             logger.debug(f"Blob eliminado: {blob_name}")
@@ -196,6 +197,7 @@ class AzureBlobService:
             Lista de nombres de blobs
         """
         try:
+            assert self._container_client is not None
             blobs = self._container_client.list_blobs(name_starts_with=name_starts_with)
             blob_names = [blob.name for blob in blobs]
             logger.debug(f"Listados {len(blob_names)} blobs")
@@ -215,6 +217,7 @@ class AzureBlobService:
             True si el blob existe
         """
         try:
+            assert self._container_client is not None
             blob_client = self._container_client.get_blob_client(blob_name)
             blob_client.get_blob_properties()
             return True
@@ -232,6 +235,7 @@ class AzureBlobService:
             Metadatos del blob o None si hay error
         """
         try:
+            assert self._container_client is not None
             blob_client = self._container_client.get_blob_client(blob_name)
             properties = blob_client.get_blob_properties()
             return properties.metadata
@@ -299,6 +303,7 @@ class AzureBlobService:
             True if download successful
         """
         try:
+            assert self._container_client is not None
             blob_client = self._container_client.get_blob_client(blob_name)
             with open(local_file_path, "wb") as download_file:
                 download_stream = blob_client.download_blob()
@@ -321,6 +326,7 @@ class AzureBlobService:
             True if update successful
         """
         try:
+            assert self._container_client is not None
             blob_client = self._container_client.get_blob_client(blob_name)
             blob_client.set_blob_metadata(metadata)
             logger.info(f"Metadata updated for blob: {blob_name}")

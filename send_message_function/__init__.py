@@ -11,6 +11,8 @@ from config.settings import settings
 from services.azure_blob_service import azure_blob_service
 from services.acs_service import acs_service
 
+# Configuración de logging global
+logging.basicConfig(level=getattr(logging, settings.log_level.upper(), logging.INFO))
 logger = logging.getLogger(__name__)
 
 
@@ -24,9 +26,8 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
     Returns:
         HttpResponse with result
     """
+    logger.info("[AUDIT] Entró a send_message_function.main")
     try:
-        # Configure logging
-        logging.basicConfig(level=getattr(logging, settings.log_level))
         
         # Check HTTP method
         if req.method != "POST":

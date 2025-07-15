@@ -59,14 +59,19 @@ func-vea-connect-prod-cl/
 │   ├── whatsapp_bot_function/   # Function folder
 │   │   └── function.json      # Event Grid binding
 │   ├── event_grid_handler.py  # Event Grid Trigger (Document Processing)
-│   └── send_message_function.py # HTTP Trigger (envío)
+│   ├── send_message_function.py # HTTP Trigger (envío)
+│   └── delete_document_function/ # HTTP Trigger (eliminación de documentos)
+│       ├── __init__.py
+│       ├── function.json
+│       └── README.md
 ├── tests/                     # Tests unitarios
 │   ├── __init__.py
 │   ├── conftest.py
 │   ├── functions/
 │   │   ├── __init__.py
 │   │   ├── test_event_grid_handler.py
-│   │   └── test_send_message_function.py
+│   │   ├── test_send_message_function.py
+│   │   └── test_delete_document_function.py
 │   └── services/
 │       ├── __init__.py
 │       ├── test_acs_service.py
@@ -160,6 +165,13 @@ El bot utiliza Event Grid para recibir eventos de WhatsApp desde ACS:
 - **TTL diferenciado** por tipo de contenido
 - **Invalidación automática** basada en tiempo
 
+### 5. Gestión de Documentos
+
+- **Eliminación completa** de documentos desde todos los servicios
+- **Sincronización automática** entre Azure Storage, Redis y embeddings
+- **API REST** para eliminación programática
+- **Logging detallado** de operaciones de eliminación
+
 ## Uso
 
 ### Desarrollo Local
@@ -246,6 +258,59 @@ POST /api/send-message
 {
   "to": "+1234567890",
   "message": "Hello from the bot!"
+}
+```
+
+### Send WhatsApp Template Function
+- **Trigger:** HTTP POST
+- **Endpoint:** `/api/send-whatsapp-template`
+- **Propósito:** Enviar mensajes de plantilla de WhatsApp (template)
+
+```json
+POST /api/send-whatsapp-template
+{
+  "to_number": "+521234567890",
+  "template_name": "vea_info_donativos",
+  "template_language": "es_MX",
+  "parameters": ["Juan"]
+}
+```
+
+**Respuesta:**
+```json
+{
+  "success": true,
+  "message": "WhatsApp template message sent successfully.",
+  "to_number": "+521234567890",
+  "template_name": "vea_info_donativos",
+  "message_id": "xxxx-xxxx-xxxx",
+  "timestamp": "2024-07-14T00:00:00.000Z"
+}
+```
+
+### Delete Document Function
+- **Trigger:** HTTP DELETE
+- **Endpoint:** `/api/delete-document`
+- **Propósito:** Eliminar documentos de todos los servicios
+
+```json
+DELETE /api/delete-document
+{
+  "document_id": "documento_123_abc12345",
+  "blob_name": "documents/mi_documento.pdf"
+}
+```
+
+**Respuesta:**
+```json
+{
+  "success": true,
+  "message": "Document deleted successfully",
+  "deletion_details": {
+    "storage_deleted": true,
+    "redis_deleted": true,
+    "embeddings_deleted": true
+  }
 }
 ```
 

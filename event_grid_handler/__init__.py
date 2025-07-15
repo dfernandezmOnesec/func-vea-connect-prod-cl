@@ -15,6 +15,8 @@ from services.acs_service import acs_service
 from core.embedding_manager import embedding_manager
 from services.redis_service import redis_service
 
+# Configuración de logging global
+logging.basicConfig(level=getattr(logging, settings.log_level.upper(), logging.INFO))
 logger = logging.getLogger(__name__)
 
 
@@ -25,9 +27,8 @@ def main(event: func.EventGridEvent) -> None:
     Args:
         event: Event Grid event containing ACS message data
     """
+    logger.info("[AUDIT] Entró a event_grid_handler.main")
     try:
-        # Configure logging
-        logging.basicConfig(level=getattr(logging, settings.log_level))
         
         logger.info(f"Event Grid event received: {event.event_type}")
         
@@ -248,9 +249,7 @@ def save_conversation_with_context(user_number: str, user_message: str, bot_resp
         
         # Save to Redis for active context (last 20 messages)
         active_context = conversation_data["messages"][-20:]
-        embedding_manager.save_conversation_context(user_number, active_context)
-        
-        logger.debug(f"Conversation saved for {user_number} (blob + redis)")
+        redis_service.save_conversation_context(conversation_id, active_context)
         
     except Exception as e:
         logger.error(f"Error saving conversation with context: {e}")
@@ -258,7 +257,7 @@ def save_conversation_with_context(user_number: str, user_message: str, bot_resp
 
 def load_conversation_history_with_redis(user_number: str) -> List[Dict[str, Any]]:
     """
-    Load conversation history from Redis for active context, fallback to blob.
+    Load conversation history from Redis for active context.
     
     Args:
         user_number: User phone number
@@ -267,26 +266,13 @@ def load_conversation_history_with_redis(user_number: str) -> List[Dict[str, Any
         List of conversation messages
     """
     try:
-        # Try to get active context from Redis first
-        active_context = embedding_manager.get_conversation_context(user_number)
-        
-        if active_context:
-            logger.debug(f"Loaded active context from Redis for {user_number}")
-            return active_context
-        
-        # Fallback to blob storage
         conversation_id = f"acs_{user_number}"
-        conversation_data = azure_blob_service.load_conversation(conversation_id)
-        
-        if conversation_data and "messages" in conversation_data:
-            # Cache in Redis for future use
-            embedding_manager.save_conversation_context(user_number, conversation_data["messages"][-20:])
-            return conversation_data["messages"]
-        
+        context = redis_service.load_conversation_context(conversation_id)
+        if context:
+            return context
         return []
-        
     except Exception as e:
-        logger.error(f"Error loading conversation history with Redis: {e}")
+        logger.error(f"Error loading conversation history from Redis: {e}")
         return []
 
 
@@ -297,25 +283,17 @@ def update_message_status(message_id: str, status: str, timestamp: str) -> None:
     Args:
         message_id: Message ID
         status: Delivery status
-        timestamp: Status timestamp
+        timestamp: Delivery timestamp
     """
     try:
-        # Create status update record
+        # Save status to blob storage
+        blob_name = f"message_status/{message_id}.json"
         status_data = {
             "message_id": message_id,
             "status": status,
-            "timestamp": timestamp,
-            "updated_at": datetime.utcnow().isoformat()
+            "timestamp": timestamp
         }
-        
-        # Save to blob storage
-        blob_name = f"message_status/{message_id}.json"
         azure_blob_service.upload_json(blob_name, status_data)
-        
-        # Also update in Redis for quick access
-        embedding_manager.save_message_status(message_id, status_data)
-        
-        logger.debug(f"Message status updated: {message_id} -> {status}")
-        
+        logger.info(f"Message status updated for {message_id}")
     except Exception as e:
         logger.error(f"Error updating message status: {e}") 

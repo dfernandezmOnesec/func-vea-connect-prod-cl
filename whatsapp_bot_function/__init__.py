@@ -11,44 +11,43 @@ from services.openai_service import openai_service
 from services.azure_blob_service import azure_blob_service
 from services.acs_service import acs_service
 
-# Configure logging
+# Configuración de logging global
+logging.basicConfig(level=getattr(logging, settings.log_level.upper(), logging.INFO))
 logger = logging.getLogger(__name__)
-logging.basicConfig(level=getattr(logging, settings.log_level.upper()))
 
 
 def main(event: func.EventGridEvent) -> None:
-    """
-    Main function to process Event Grid events from Azure Communication Services (WhatsApp).
-    """
+    logger.info("[AUDIT] Entró a whatsapp_bot_function.main")
+    logger.info(f"[DEBUG] Event received in whatsapp_bot_function: {event.event_type}")
+    # Procesar eventos de WhatsApp (AdvancedMessageReceived)
+    if event.event_type != "Microsoft.Communication.AdvancedMessageReceived":
+        logger.info(f"[DEBUG] Skipping event type: {event.event_type}")
+        return
     try:
-        logger.info(f"Processing Event Grid event: {event.event_type}")
-        if event.event_type != "Microsoft.Communication.SMSReceived":
-            logger.info(f"Skipping event type: {event.event_type}")
-            return
         event_data = event.get_json()
-        logger.info(f"Event data received: {json.dumps(event_data, indent=2)}")
+        logger.info(f"[DEBUG] Event data received: {json.dumps(event_data, indent=2)}")
         message_details = _extract_message_details(event_data)
         if not message_details:
-            logger.error("Failed to extract message details from event data")
+            logger.error("[DEBUG] Failed to extract message details from event data")
             return
         user_number = message_details["from_number"]
         message_content = message_details["message"]
         timestamp = message_details["timestamp"]
-        logger.info(f"Processing message from {user_number}: {message_content[:50]}...")
+        logger.info(f"[DEBUG] Processing message from {user_number}: {message_content[:50]}...")
         conversation_id = f"whatsapp_{user_number}"
         conversation_context = _load_conversation_context(conversation_id)
         ai_response = _generate_ai_response(user_number, message_content, conversation_context)
         if not ai_response:
-            logger.error(f"Failed to generate AI response for user {user_number}")
+            logger.error(f"[DEBUG] Failed to generate AI response for user {user_number}")
             return
         message_id = acs_service.send_whatsapp_message(user_number, ai_response)
         if not message_id:
-            logger.error(f"Failed to send WhatsApp response to {user_number}")
+            logger.error(f"[DEBUG] Failed to send WhatsApp response to {user_number}")
             return
         _save_conversation(conversation_id, user_number, message_content, ai_response, timestamp)
-        logger.info(f"Successfully processed message from {user_number}, response sent with ID: {message_id}")
+        logger.info(f"[DEBUG] Successfully processed message from {user_number}, response sent with ID: {message_id}")
     except Exception as e:
-        logger.error(f"Error processing Event Grid event: {e}", exc_info=True)
+        logger.error(f"[DEBUG] Error processing Event Grid event: {e}", exc_info=True)
         raise
 
 
