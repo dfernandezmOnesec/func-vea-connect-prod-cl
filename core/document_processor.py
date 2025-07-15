@@ -50,6 +50,7 @@ class DocumentProcessor:
             True if processing was successful, False otherwise
         """
         try:
+            logger.info(f"[TRACE] Iniciando procesamiento de documento desde cola: {blob_name}")
             # Create temporary file for processing
             with tempfile.NamedTemporaryFile(delete=False, suffix=Path(blob_name).suffix) as temp_file:
                 temp_file_path = temp_file.name
@@ -76,11 +77,14 @@ class DocumentProcessor:
                     logger.warning(f"No text extracted from file: {blob_name}")
                     return False
                 
+                logger.info(f"[TRACE] Extrayendo texto del archivo: {blob_name}")
+                
                 # Clean and chunk text
                 cleaned_text = self._clean_text(extracted_text)
                 text_chunks = self._chunk_text(cleaned_text, chunk_size=1000, overlap=100)
                 
                 logger.info(f"Text extracted and chunked. Original length: {len(extracted_text)}, Chunks: {len(text_chunks)}")
+                logger.info(f"[TRACE] Limpiando y dividiendo el texto extraído en chunks")
                 
                 # Generate embeddings for each chunk
                 embeddings = self._generate_embeddings_for_chunks(text_chunks)
@@ -88,11 +92,17 @@ class DocumentProcessor:
                     logger.error("No embeddings generated for any chunks")
                     return False
                 
+                logger.info(f"[TRACE] Generando embeddings para los chunks del documento")
+                
                 # Store embeddings and metadata in Redis
                 self._store_document_embeddings(document_id, blob_name, embeddings, file_metadata)
                 
+                logger.info(f"[TRACE] Guardando embeddings y metadatos en Redis para el documento: {document_id}")
+                
                 # Update blob metadata to mark as processed
                 self._update_blob_metadata(blob_name, document_id, len(embeddings))
+                
+                logger.info(f"[TRACE] Actualizando metadatos del blob para el documento procesado: {document_id}")
                 
                 logger.info(f"Successfully processed document: {document_id}")
                 return True
@@ -490,6 +500,7 @@ class DocumentProcessor:
                 
                 # Store in Redis
                 self.redis_service.store_embedding(document_id, avg_embedding, document_metadata)
+                logger.info(f"[TRACE] Embedding promedio almacenado en Redis para el documento: {document_id}")
                 logger.info(f"Stored document embeddings in Redis: {document_id}")
                 
         except Exception as e:
