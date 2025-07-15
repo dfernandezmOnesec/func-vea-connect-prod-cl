@@ -7,6 +7,7 @@ azure-communication-sms==1.0.1
 azure-communication-phonenumbers==1.1.0
 azure-eventgrid==4.22.0
 azure-cognitiveservices-vision-computervision==0.9.0
+azure-communication-messages
 
 # Document processing
 pypdf==3.17.4
