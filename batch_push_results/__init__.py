@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 
 
 def main(msg: func.QueueMessage) -> None:
+    raise Exception("Debug: carga de batch_push_results")
     """
     Processes queue messages to generate embeddings for documents.
     

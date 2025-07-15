@@ -155,11 +155,11 @@ class ComputerVisionService:
                 analysis = self.client.analyze_image(image, visual_features=['tags', 'description', 'faces', 'objects'])
             else:
                 with open(image, 'rb') as image_file:
-                analysis = self.client.analyze_image_in_stream(
-                    image_file,
-                    visual_features=['tags', 'description', 'faces', 'objects'],
-                    language='en'
-                )
+                    analysis = self.client.analyze_image_in_stream(
+                        image_file,
+                        visual_features=['tags', 'description', 'faces', 'objects'],
+                        language='en'
+                    )
                 if not analysis:
                     logger.error("No analysis result received")
                     return None
@@ -334,7 +334,7 @@ class ComputerVisionService:
             result = self.client.get_read_result(operation_id)  # type: ignore
             if hasattr(result, 'status'):
                 if result.status == OperationStatusCodes.succeeded:  # type: ignore
-                return result
+                    return result
                 elif result.status in [OperationStatusCodes.failed]:  # type: ignore
                     return None
             time.sleep(1)
