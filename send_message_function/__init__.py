@@ -68,7 +68,7 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
             )
         
         # Send message
-        message_id = acs_service.send_whatsapp_message(to_number, message)
+        message_id = acs_service.send_whatsapp_text_message(to_number, message)
         
         if message_id:
             # Save to history

@@ -54,6 +54,8 @@ def handle_whatsapp_message_received(event: func.EventGridEvent) -> None:
     try:
         # Extract WhatsApp message data from event
         message_data = event.get_json()
+        if isinstance(message_data, str):
+            message_data = json.loads(message_data)
         logger.info(f"WhatsApp message received: {json.dumps(message_data, indent=2)}")
         
         # Extract message details for WhatsApp
@@ -89,6 +91,8 @@ def handle_whatsapp_delivery_report(event: func.EventGridEvent) -> None:
     try:
         # Extract delivery report data
         report_data = event.get_json()
+        if isinstance(report_data, str):
+            report_data = json.loads(report_data)
         logger.info(f"WhatsApp delivery report: {json.dumps(report_data, indent=2)}")
         
         # Extract report details
@@ -121,7 +125,7 @@ def process_incoming_whatsapp_message(from_number: str, message_content: str, me
         
         if response_text:
             # Send response using ACS
-            sent_message_id = acs_service.send_whatsapp_message(from_number, response_text)
+            sent_message_id = acs_service.send_whatsapp_text_message(from_number, response_text)
             
             if sent_message_id:
                 # Save conversation with enhanced context

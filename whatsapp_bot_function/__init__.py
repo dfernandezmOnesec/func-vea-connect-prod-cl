@@ -25,6 +25,8 @@ def main(event: func.EventGridEvent) -> None:
         return
     try:
         event_data = event.get_json()
+        if isinstance(event_data, str):
+            event_data = json.loads(event_data)
         logger.info(f"[DEBUG] Event data received: {json.dumps(event_data, indent=2)}")
         message_details = _extract_message_details(event_data)
         if not message_details:
@@ -40,7 +42,7 @@ def main(event: func.EventGridEvent) -> None:
         if not ai_response:
             logger.error(f"[DEBUG] Failed to generate AI response for user {user_number}")
             return
-        message_id = acs_service.send_whatsapp_message(user_number, ai_response)
+        message_id = acs_service.send_whatsapp_text_message(user_number, ai_response)
         if not message_id:
             logger.error(f"[DEBUG] Failed to send WhatsApp response to {user_number}")
             return
@@ -152,7 +154,7 @@ def _send_whatsapp_response(user_number: str, message: str) -> Optional[str]:
         Message ID if sent successfully, None otherwise
     """
     try:
-        message_id = acs_service.send_whatsapp_message(user_number, message)
+        message_id = acs_service.send_whatsapp_text_message(user_number, message)
         
         if message_id:
             logger.info(f"WhatsApp message sent to {user_number}, ID: {message_id}")
