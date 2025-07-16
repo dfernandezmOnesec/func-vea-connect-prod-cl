@@ -47,7 +47,6 @@ def main(event: func.EventGridEvent) -> None:
 def handle_whatsapp_message_received(event: func.EventGridEvent) -> None:
     """
     Handle WhatsApp message received events from ACS.
-    
     Args:
         event: Event Grid event with WhatsApp message data
     """
@@ -57,26 +56,36 @@ def handle_whatsapp_message_received(event: func.EventGridEvent) -> None:
         if isinstance(message_data, str):
             message_data = json.loads(message_data)
         logger.info(f"WhatsApp message received: {json.dumps(message_data, indent=2)}")
-        
-        # Extract message details for WhatsApp
-        from_number = message_data.get('from', {}).get('phoneNumber')
-        message_content = message_data.get('message', {}).get('content')
-        message_id = message_data.get('id')
+
+        # Soporta ambos formatos: dict anidado o plano
+        from_number = None
+        if isinstance(message_data.get('from'), dict):
+            from_number = message_data['from'].get('phoneNumber')
+        elif isinstance(message_data.get('from'), str):
+            from_number = message_data['from']
+
+        message_content = None
+        if isinstance(message_data.get('message'), dict):
+            message_content = message_data['message'].get('content')
+        elif message_data.get('content'):
+            message_content = message_data['content']
+
+        message_id = message_data.get('id') or message_data.get('messageId')
         received_timestamp = message_data.get('receivedTimestamp')
         channel_type = message_data.get('channelType', 'whatsapp')
-        
+
         # Validate required fields
         if not from_number or not message_content:
             logger.warning("Missing from_number or message_content in WhatsApp event")
             return
-            
+
         if channel_type != 'whatsapp':
             logger.info(f"Ignoring non-WhatsApp message from channel: {channel_type}")
             return
-        
+
         # Process the message
         process_incoming_whatsapp_message(from_number, message_content, message_id, received_timestamp)
-        
+
     except Exception as e:
         logger.error(f"Error handling WhatsApp message received event: {e}")
 
@@ -108,34 +117,71 @@ def handle_whatsapp_delivery_report(event: func.EventGridEvent) -> None:
 
 
 def process_incoming_whatsapp_message(from_number: str, message_content: str, message_id: str, timestamp: str) -> None:
-    """
-    Process incoming WhatsApp message and generate response with RAG.
-    
-    Args:
-        from_number: Sender phone number
-        message_content: Message content
-        message_id: Message ID
-        timestamp: Message timestamp
-    """
     try:
         logger.info(f"Processing WhatsApp message from {from_number}: {message_content}")
-        
-        # Generate response using OpenAI with RAG
-        response_text = generate_response_with_rag(message_content, from_number)
-        
-        if response_text:
-            # Send response using ACS
+
+        # Normaliza el mensaje a minúsculas para comparar
+        msg = message_content.lower()
+
+        if "donativo" in msg:
+            template_name = "vea_info_donativos"
+            parameters = [
+                "Juan Pérez",           # customer_name
+                "Ministerio Esperanza", # ministry_name
+                "BBVA",                 # bank_name
+                "Iglesia Esperanza",    # beneficiary_name
+                "1234567890",           # account_number
+                "012345678901234567",   # clabe_number
+                "Padre Juan",           # contact_name
+                "5551234567"            # contact_phone
+            ]
+        elif "evento" in msg:
+            template_name = "vea_event_info"
+            parameters = [
+                "Juan Pérez",           # customer_name
+                "Retiro Espiritual",    # event_name
+                "20 de julio, 2024",    # event_date
+                "Parroquia San Juan"    # event_location
+            ]
+        elif "contacto" in msg:
+            template_name = "vea_contacto_ministerio"
+            parameters = [
+                "Juan Pérez",           # customer_name
+                "Ministerio Esperanza", # ministry_name
+                "Padre Juan",           # contact_name
+                "5551234567"            # contact_phone
+            ]
+        elif "solicitud" in msg:
+            template_name = "vea_request_received"
+            parameters = [
+                "Juan Pérez",           # customer_name
+                "Solicitud de oración"  # request_summary
+            ]
+        else:
+            # Si no coincide, responde con texto simple o una plantilla por defecto
+            response_text = "¡Hola! Puedes escribir 'donativo', 'evento', 'contacto' o 'solicitud' para recibir información."
             sent_message_id = acs_service.send_whatsapp_text_message(from_number, response_text)
-            
             if sent_message_id:
-                # Save conversation with enhanced context
                 save_conversation_with_context(from_number, message_content, response_text, timestamp, message_id, sent_message_id)
                 logger.info(f"Response sent to {from_number}, message ID: {sent_message_id}")
             else:
                 logger.error(f"Failed to send response to {from_number}")
+            return
+
+        # Envía la plantilla seleccionada
+        sent_message_id = acs_service.send_whatsapp_template_message(
+            from_number,
+            template_name,
+            "es_MX",
+            parameters
+        )
+
+        if sent_message_id:
+            save_conversation_with_context(from_number, message_content, f"[PLANTILLA {template_name} ENVIADA]", timestamp, message_id, sent_message_id)
+            logger.info(f"Response sent to {from_number}, message ID: {sent_message_id}")
         else:
-            logger.error("Failed to generate response")
-            
+            logger.error(f"Failed to send response to {from_number}")
+
     except Exception as e:
         logger.error(f"Error processing incoming WhatsApp message: {e}")
 
