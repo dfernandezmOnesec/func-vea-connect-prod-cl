@@ -23,12 +23,24 @@ logger = logging.getLogger(__name__)
 class DocumentProcessor:
     """Core document processing logic."""
     
-    def __init__(self):
-        """Initialize document processor."""
-        self.blob_service = azure_blob_service
-        self.openai_service = openai_service
-        self.redis_service = redis_service
-        self.vision_service = computer_vision_service
+    def __init__(
+        self,
+        blob_service=None,
+        openai_service=None,
+        redis_service=None,
+        vision_service=None,
+        logger_instance=None
+    ):
+        """Initialize document processor with optional dependency injection."""
+        from services.azure_blob_service import azure_blob_service as _blob
+        from services.openai_service import openai_service as _openai
+        from services.redis_service import redis_service as _redis
+        from services.computer_vision_service import computer_vision_service as _vision
+        self.blob_service = blob_service or _blob
+        self.openai_service = openai_service or _openai
+        self.redis_service = redis_service or _redis
+        self.vision_service = vision_service or _vision
+        self.logger = logger_instance or logger
     
     def process_document_from_queue(
         self, 
@@ -50,7 +62,7 @@ class DocumentProcessor:
             True if processing was successful, False otherwise
         """
         try:
-            logger.info(f"[TRACE] Iniciando procesamiento de documento desde cola: {blob_name}")
+            self.logger.info(f"[TRACE] Iniciando procesamiento de documento desde cola: {blob_name}")
             # Create temporary file for processing
             with tempfile.NamedTemporaryFile(delete=False, suffix=Path(blob_name).suffix) as temp_file:
                 temp_file_path = temp_file.name
@@ -59,10 +71,10 @@ class DocumentProcessor:
                 # Download file from blob storage
                 download_success = self.blob_service.download_file(blob_name, temp_file_path)
                 if not download_success:
-                    logger.error(f"Failed to download blob: {blob_name}")
+                    self.logger.error(f"Failed to download blob: {blob_name}")
                     return False
                 
-                logger.info(f"Successfully downloaded blob: {blob_name}")
+                self.logger.info(f"Successfully downloaded blob: {blob_name}")
                 
                 # Get file metadata
                 file_metadata = self.blob_service.get_blob_metadata(blob_name) or {}
@@ -74,111 +86,143 @@ class DocumentProcessor:
                 # Extract text based on file type
                 extracted_text = self._extract_text_from_file(temp_file_path, blob_name, content_type)
                 if not extracted_text:
-                    logger.warning(f"No text extracted from file: {blob_name}")
+                    self.logger.warning(f"No text extracted from file: {blob_name}")
                     return False
                 
-                logger.info(f"[TRACE] Extrayendo texto del archivo: {blob_name}")
+                self.logger.info(f"[TRACE] Extrayendo texto del archivo: {blob_name}")
                 
                 # Clean and chunk text
                 cleaned_text = self._clean_text(extracted_text)
                 text_chunks = self._chunk_text(cleaned_text, chunk_size=1000, overlap=100)
                 
-                logger.info(f"Text extracted and chunked. Original length: {len(extracted_text)}, Chunks: {len(text_chunks)}")
-                logger.info(f"[TRACE] Limpiando y dividiendo el texto extraído en chunks")
+                self.logger.info(f"Text extracted and chunked. Original length: {len(extracted_text)}, Chunks: {len(text_chunks)}")
+                self.logger.info(f"[TRACE] Limpiando y dividiendo el texto extraído en chunks")
                 
                 # Generate embeddings for each chunk
                 embeddings = self._generate_embeddings_for_chunks(text_chunks)
                 if not embeddings:
-                    logger.error("No embeddings generated for any chunks")
+                    self.logger.error("No embeddings generated for any chunks")
                     return False
                 
-                logger.info(f"[TRACE] Generando embeddings para los chunks del documento")
+                self.logger.info(f"[TRACE] Generando embeddings para los chunks del documento")
                 
                 # Store embeddings and metadata in Redis
                 self._store_document_embeddings(document_id, blob_name, embeddings, file_metadata)
                 
-                logger.info(f"[TRACE] Guardando embeddings y metadatos en Redis para el documento: {document_id}")
+                self.logger.info(f"[TRACE] Guardando embeddings y metadatos en Redis para el documento: {document_id}")
                 
                 # Update blob metadata to mark as processed
                 self._update_blob_metadata(blob_name, document_id, len(embeddings))
                 
-                logger.info(f"[TRACE] Actualizando metadatos del blob para el documento procesado: {document_id}")
+                self.logger.info(f"[TRACE] Actualizando metadatos del blob para el documento procesado: {document_id}")
                 
-                logger.info(f"Successfully processed document: {document_id}")
+                self.logger.info(f"Successfully processed document: {document_id}")
                 return True
                 
             finally:
                 # Clean up temporary file
                 if os.path.exists(temp_file_path):
                     os.unlink(temp_file_path)
-                    logger.info(f"Temporary file cleaned up: {temp_file_path}")
+                    self.logger.info(f"Temporary file cleaned up: {temp_file_path}")
                     
         except Exception as e:
-            logger.error(f"Failed to process document {blob_name}: {e}")
+            self.logger.error(f"Failed to process document {blob_name}: {e}")
             return False
     
     def process_document_from_blob(self, blob_stream, blob_name: str) -> bool:
         """
-        Process document from blob trigger.
-        
-        Args:
-            blob_stream: Blob input stream
-            blob_name: Name of the blob
-            
-        Returns:
-            True if processing was successful, False otherwise
+        Procesa archivos subidos a Blob Storage: texto, imágenes y PDF (texto o escaneados).
+        Divide en chunks, genera embeddings por chunk y guarda cada uno en Redis.
         """
+        self.logger.info(f"[DEBUG] Iniciando process_document_from_blob para: {blob_name}")
         try:
-            # Create temporary file for processing
+            # Crear archivo temporal
             with tempfile.NamedTemporaryFile(delete=False, suffix=Path(blob_name).suffix) as temp_file:
-                # Write blob content to temporary file
                 temp_file.write(blob_stream.read())
                 temp_file_path = temp_file.name
-            
+                self.logger.info(f"[DEBUG] Archivo temporal creado: {temp_file_path}")
             try:
-                # Get file metadata
+                # Obtener metadata
                 file_metadata = self.blob_service.get_blob_metadata(blob_name) or {}
-                logger.info(f"File metadata retrieved: {file_metadata}")
-                
-                # Calculate file hash for document ID
-                file_hash = self._calculate_file_hash(temp_file_path)
-                document_id = self._generate_document_id(blob_name, file_hash)
-                
-                # Extract text based on file type
-                extracted_text = self._extract_text_from_file(temp_file_path, blob_name)
-                if not extracted_text:
-                    logger.warning(f"No text extracted from file: {blob_name}")
+                self.logger.info(f"[DEBUG] Metadata del archivo obtenida: {file_metadata}")
+                # Detectar tipo de archivo
+                ext = Path(blob_name).suffix.lower()
+                extracted_text = ""
+                if ext in ['.txt', '.md', '.csv']:
+                    self.logger.info(f"[DEBUG] Procesando como archivo de texto: {blob_name}")
+                    with open(temp_file_path, 'r', encoding='utf-8') as f:
+                        extracted_text = f.read()
+                elif ext in ['.jpg', '.jpeg', '.png', '.bmp', '.gif', '.tiff']:
+                    self.logger.info(f"[DEBUG] Procesando como imagen: {blob_name}")
+                    with open(temp_file_path, 'rb') as f:
+                        image_bytes = f.read()
+                    extracted_text = self.vision_service.extract_text_from_image_bytes(image_bytes)
+                elif ext == '.pdf':
+                    self.logger.info(f"[DEBUG] Procesando como PDF: {blob_name}")
+                    # Intentar extraer texto directo
+                    extracted_text = self._extract_text_from_file(temp_file_path, blob_name)
+                    if not extracted_text or len(extracted_text.strip()) < 20:
+                        self.logger.info(f"[DEBUG] PDF parece escaneado, usando visión computacional")
+                        # Extraer imágenes de cada página y pasar por visión
+                        try:
+                            import fitz  # PyMuPDF
+                            doc = fitz.open(temp_file_path)
+                            pdf_text = []
+                            for page_num in range(len(doc)):
+                                page = doc.load_page(page_num)
+                                images = page.get_images(full=True)
+                                for img_index, img in enumerate(images):
+                                    xref = img[0]
+                                    base_image = doc.extract_image(xref)
+                                    image_bytes = base_image['image']
+                                    text_img = self.vision_service.extract_text_from_image_bytes(image_bytes)
+                                    if text_img:
+                                        pdf_text.append(text_img)
+                            extracted_text = '\n'.join(pdf_text)
+                        except Exception as e:
+                            self.logger.error(f"[ERROR] Error extrayendo texto de PDF escaneado: {e}")
+                else:
+                    self.logger.warning(f"[WARNING] Formato de archivo no soportado: {blob_name}")
                     return False
-                
-                # Clean and chunk text
-                cleaned_text = self._clean_text(extracted_text)
-                text_chunks = self._chunk_text(cleaned_text, chunk_size=1000, overlap=100)
-                
-                logger.info(f"Text extracted and chunked. Original length: {len(extracted_text)}, Chunks: {len(text_chunks)}")
-                
-                # Generate embeddings for each chunk
-                embeddings = self._generate_embeddings_for_chunks(text_chunks)
-                if not embeddings:
-                    logger.error("No embeddings generated for any chunks")
+                if not extracted_text or len(extracted_text.strip()) == 0:
+                    self.logger.warning(f"[WARNING] No se extrajo texto del archivo: {blob_name}")
                     return False
-                
-                # Store embeddings and metadata in Redis
-                self._store_document_embeddings(document_id, blob_name, embeddings, file_metadata)
-                
-                # Update blob metadata to mark as processed
-                self._update_blob_metadata(blob_name, document_id, len(embeddings))
-                
-                logger.info(f"Successfully processed document: {document_id}")
+                self.logger.info(f"[DEBUG] Texto extraído exitosamente. Longitud: {len(extracted_text)} caracteres")
+                # Chunking
+                self.logger.info(f"[DEBUG] Iniciando chunking del texto")
+                text_chunks = self._chunk_text(extracted_text, chunk_size=1000, overlap=100)
+                self.logger.info(f"[DEBUG] Texto dividido en {len(text_chunks)} chunks")
+                # Procesar cada chunk: generar embedding y guardar en Redis
+                for idx, chunk in enumerate(text_chunks):
+                    self.logger.info(f"[DEBUG] Procesando chunk {idx+1}/{len(text_chunks)}")
+                    embedding = self.openai_service.generate_embedding(chunk)
+                    if embedding:
+                        chunk_metadata = {
+                            "chunk_index": idx,
+                            "document_id": blob_name,
+                            "filename": blob_name,
+                            "content": chunk,
+                            "embedding": embedding,
+                            "file_metadata": file_metadata
+                        }
+                        self.redis_service.set_cache(f"doc_chunk:{blob_name}:{idx}", chunk_metadata)
+                        self.logger.info(f"[SUCCESS] Chunk {idx+1} almacenado en Redis para {blob_name}")
+                    else:
+                        self.logger.error(f"[ERROR] No se pudo generar embedding para chunk {idx+1} de {blob_name}")
+                # Actualizar metadatos del blob
+                self.logger.info(f"[DEBUG] Actualizando metadatos del blob")
+                self._update_blob_metadata(blob_name, blob_name, len(text_chunks))
+                self.logger.info(f"[DEBUG] Metadatos del blob actualizados")
+                self.logger.info(f"[SUCCESS] Documento procesado exitosamente: {blob_name}")
                 return True
-                
             finally:
-                # Clean up temporary file
                 if os.path.exists(temp_file_path):
                     os.unlink(temp_file_path)
-                    logger.info(f"Temporary file cleaned up: {temp_file_path}")
-                    
+                    self.logger.info(f"[DEBUG] Archivo temporal eliminado: {temp_file_path}")
         except Exception as e:
-            logger.error(f"Failed to process blob {blob_name}: {e}")
+            self.logger.error(f"[ERROR] Error procesando blob {blob_name}: {e}")
+            import traceback
+            self.logger.error(f"[ERROR] Traceback completo: {traceback.format_exc()}")
             return False
     
     def process_document(self, file_url: str, file_name: str, user_id: str, options: Dict[str, Any]) -> Dict[str, Any]:
@@ -353,29 +397,29 @@ class DocumentProcessor:
             # Check if it's an image file (based on extension or content type)
             if (file_extension in ['.jpg', '.jpeg', '.png', '.bmp', '.gif', '.tiff'] or 
                 'image/' in content_type.lower()):
-                logger.info(f"Processing image file with OCR: {blob_name}")
+                self.logger.info(f"Processing image file with OCR: {blob_name}")
                 return self.vision_service.extract_text_from_image_file(file_path)
                 
             elif file_extension == '.pdf' or content_type == 'application/pdf':
-                logger.info(f"Processing PDF file: {blob_name}")
+                self.logger.info(f"Processing PDF file: {blob_name}")
                 return self._extract_text_from_pdf(file_path)
                 
             elif file_extension in ['.docx', '.doc'] or 'word' in content_type.lower():
-                logger.info(f"Processing Word document: {blob_name}")
+                self.logger.info(f"Processing Word document: {blob_name}")
                 return self._extract_text_from_word(file_path)
                 
             elif (file_extension in ['.txt', '.md', '.csv'] or 
                   'text/' in content_type.lower() or 
                   'plain' in content_type.lower()):
-                logger.info(f"Processing text file: {blob_name}")
+                self.logger.info(f"Processing text file: {blob_name}")
                 return self._extract_text_from_text_file(file_path)
                 
             else:
-                logger.warning(f"Unsupported file type: {file_extension} (content_type: {content_type})")
+                self.logger.warning(f"Unsupported file type: {file_extension} (content_type: {content_type})")
                 return ""
                 
         except Exception as e:
-            logger.error(f"Failed to extract text from {blob_name}: {e}")
+            self.logger.error(f"Failed to extract text from {blob_name}: {e}")
             raise
     
     def _extract_text_from_pdf(self, file_path: str) -> str:
@@ -392,7 +436,7 @@ class DocumentProcessor:
             return text.strip()
             
         except Exception as e:
-            logger.error(f"Failed to extract text from PDF: {e}")
+            self.logger.error(f"Failed to extract text from PDF: {e}")
             raise
     
     def _extract_text_from_word(self, file_path: str) -> str:
@@ -408,7 +452,7 @@ class DocumentProcessor:
             return text.strip()
             
         except Exception as e:
-            logger.error(f"Failed to extract text from Word document: {e}")
+            self.logger.error(f"Failed to extract text from Word document: {e}")
             raise
     
     def _extract_text_from_text_file(self, file_path: str) -> str:
@@ -423,10 +467,10 @@ class DocumentProcessor:
                 with open(file_path, 'r', encoding='latin-1') as file:
                     return file.read()
             except Exception as e:
-                logger.error(f"Failed to read text file with alternative encoding: {e}")
+                self.logger.error(f"Failed to read text file with alternative encoding: {e}")
                 raise
         except Exception as e:
-            logger.error(f"Failed to read text file: {e}")
+            self.logger.error(f"Failed to read text file: {e}")
             raise
     
     def _generate_embeddings_for_chunks(self, text_chunks: List[str]) -> List[Dict[str, Any]]:
@@ -449,11 +493,11 @@ class DocumentProcessor:
                         "text": chunk,
                         "embedding": embedding
                     })
-                    logger.info(f"Generated embedding for chunk {i+1}/{len(text_chunks)}")
+                    self.logger.info(f"Generated embedding for chunk {i+1}/{len(text_chunks)}")
                 else:
-                    logger.error(f"Failed to generate embedding for chunk {i}")
+                    self.logger.error(f"Failed to generate embedding for chunk {i}")
             except Exception as e:
-                logger.error(f"Failed to generate embedding for chunk {i}: {e}")
+                self.logger.error(f"Failed to generate embedding for chunk {i}: {e}")
                 continue
         
         return embeddings
@@ -474,6 +518,7 @@ class DocumentProcessor:
             embeddings: List of embeddings with text chunks
             file_metadata: File metadata from blob storage
         """
+        self.logger.info(f"[DEBUG] Iniciando _store_document_embeddings para documento: {document_id}")
         try:
             # Create document metadata
             document_metadata = {
@@ -487,24 +532,33 @@ class DocumentProcessor:
                 "processing_timestamp": file_metadata.get("processing_timestamp", ""),
                 "embeddings_generated": "true"
             }
+            self.logger.info(f"[DEBUG] Metadata del documento creada: {document_metadata}")
             
             # Store main document embedding (average of all chunks)
             if embeddings:
                 # Calculate average embedding
                 avg_embedding = []
                 embedding_length = len(embeddings[0]["embedding"])
+                self.logger.info(f"[DEBUG] Calculando embedding promedio de {len(embeddings)} embeddings de longitud {embedding_length}")
                 
                 for i in range(embedding_length):
                     avg_value = sum(emb["embedding"][i] for emb in embeddings) / len(embeddings)
                     avg_embedding.append(avg_value)
                 
+                self.logger.info(f"[DEBUG] Embedding promedio calculado. Longitud: {len(avg_embedding)}")
+                
                 # Store in Redis
-                self.redis_service.store_embedding(document_id, avg_embedding, document_metadata)
-                logger.info(f"[TRACE] Embedding promedio almacenado en Redis para el documento: {document_id}")
-                logger.info(f"Stored document embeddings in Redis: {document_id}")
+                self.logger.info(f"[DEBUG] Intentando almacenar en Redis con clave: embedding:{document_id}")
+                redis_success = self.redis_service.store_embedding(document_id, avg_embedding, document_metadata)
+                if redis_success:
+                    self.logger.info(f"[SUCCESS] Embedding almacenado exitosamente en Redis para documento: {document_id}")
+                else:
+                    self.logger.error(f"[ERROR] Falló el almacenamiento en Redis para documento: {document_id}")
                 
         except Exception as e:
-            logger.error(f"Failed to store document embeddings: {e}")
+            self.logger.error(f"[ERROR] Error en _store_document_embeddings para {document_id}: {e}")
+            import traceback
+            self.logger.error(f"[ERROR] Traceback completo: {traceback.format_exc()}")
             raise
     
     def _update_blob_metadata(self, blob_name: str, document_id: str, chunks_count: int) -> None:
@@ -527,10 +581,10 @@ class DocumentProcessor:
             
             # Update blob metadata
             self.blob_service.update_blob_metadata(blob_name, metadata)
-            logger.info(f"Updated blob metadata for {blob_name}")
+            self.logger.info(f"Updated blob metadata for {blob_name}")
             
         except Exception as e:
-            logger.error(f"Failed to update blob metadata: {e}")
+            self.logger.error(f"Failed to update blob metadata: {e}")
             raise
     
     def _calculate_file_hash(self, file_path: str) -> str:
@@ -542,7 +596,7 @@ class DocumentProcessor:
                     hash_sha256.update(chunk)
             return hash_sha256.hexdigest()
         except Exception as e:
-            logger.error(f"Failed to calculate file hash: {e}")
+            self.logger.error(f"Failed to calculate file hash: {e}")
             raise
     
     def _generate_document_id(self, blob_name: str, file_hash: str) -> str:
@@ -552,7 +606,7 @@ class DocumentProcessor:
             base_name = Path(blob_name).stem
             return f"{base_name}_{file_hash[:8]}"
         except Exception as e:
-            logger.error(f"Failed to generate document ID: {e}")
+            self.logger.error(f"Failed to generate document ID: {e}")
             raise
     
     def _clean_text(self, text: str) -> str:
@@ -564,7 +618,7 @@ class DocumentProcessor:
             text = text.replace('\x00', '')
             return text.strip()
         except Exception as e:
-            logger.error(f"Failed to clean text: {e}")
+            self.logger.error(f"Failed to clean text: {e}")
             return text
     
     def _chunk_text(self, text: str, chunk_size: int = 1000, overlap: int = 100) -> List[str]:
@@ -587,7 +641,7 @@ class DocumentProcessor:
             
             return chunks
         except Exception as e:
-            logger.error(f"Failed to chunk text: {e}")
+            self.logger.error(f"Failed to chunk text: {e}")
             return [text] 
 
     def _extract_text_from_pdf_bytes(self, pdf_bytes: bytes) -> str:
@@ -605,7 +659,7 @@ class DocumentProcessor:
             
             return text.strip()
         except Exception as e:
-            logger.error(f"Failed to extract text from PDF bytes: {e}")
+            self.logger.error(f"Failed to extract text from PDF bytes: {e}")
             raise
 
     def _extract_text_from_word_bytes(self, docx_bytes: bytes) -> str:
@@ -623,5 +677,5 @@ class DocumentProcessor:
             
             return text.strip()
         except Exception as e:
-            logger.error(f"Failed to extract text from Word document bytes: {e}")
+            self.logger.error(f"Failed to extract text from Word document bytes: {e}")
             raise 

@@ -12,17 +12,16 @@ class TestAzureBlobService:
     
     def setup_method(self):
         """Set up test fixtures."""
-        with patch('services.azure_blob_service.BlobServiceClient') as mock_blob_service:
-            with patch('services.azure_blob_service.settings') as mock_settings:
-                mock_settings.azure_storage_connection_string = "test_connection_string"
-                mock_settings.blob_container_name = "test_container"
-                
-                self.mock_container_client = Mock()
-                self.mock_blob_service_client = Mock()
-                self.mock_blob_service_client.get_container_client.return_value = self.mock_container_client
-                mock_blob_service.from_connection_string.return_value = self.mock_blob_service_client
-                
-                self.service = AzureBlobService()
+        self.mock_container_client = Mock()
+        self.mock_blob_service_client = Mock()
+        self.mock_blob_service_client.get_container_client.return_value = self.mock_container_client
+        self.mock_logger = Mock()
+        self.service = AzureBlobService(
+            blob_service_client=self.mock_blob_service_client,
+            container_client=self.mock_container_client,
+            logger_instance=self.mock_logger,
+            container_name="test_container"
+        )
     
     def test_init_success(self):
         """Test successful initialization."""
@@ -35,17 +34,21 @@ class TestAzureBlobService:
         with patch('services.azure_blob_service.settings') as mock_settings:
             mock_settings.azure_storage_connection_string = "test_connection_string"
             mock_settings.blob_container_name = "test_container"
-            
             mock_container_client = Mock()
             mock_blob_service_client = Mock()
             mock_blob_service_client.get_container_client.return_value = mock_container_client
+            mock_blob_service_client.create_container = Mock()  # Asegura que sea un Mock
             mock_blob_service.from_connection_string.return_value = mock_blob_service_client
-            
             # Simulate container doesn't exist
             mock_container_client.get_container_properties.side_effect = Exception("Container not found")
-            
+            # Aquí NO pasamos mocks explícitos para forzar inicialización real
             service = AzureBlobService()
-            
+            # Forzar que _initialized sea False para probar la inicialización
+            service._initialized = False
+            service._blob_service_client = mock_blob_service_client
+            service._container_client = mock_container_client
+            # Llamar a _initialize_client para forzar la lógica
+            service._initialize_client()
             mock_blob_service_client.create_container.assert_called_once_with("test_container")
     
     def test_upload_text_success(self):

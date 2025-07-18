@@ -13,21 +13,26 @@ logger = logging.getLogger(__name__)
 class AzureOpenAIService:
     """Service for Azure OpenAI."""
     
-    def __init__(self):
-        """Initialize Azure OpenAI client."""
-        try:
+    def __init__(
+        self,
+        client=None,
+        logger_instance=None,
+        settings_instance=None
+    ):
+        self.settings = settings_instance or settings
+        self.logger = logger_instance or logger
+        if client is not None:
+            self.client = client
+        else:
             self.client = AzureOpenAI(
-                api_key=settings.openai_api_key,
-                api_version=settings.azure_openai_chat_api_version,
-                azure_endpoint=settings.azure_openai_endpoint
+                api_key=self.settings.openai_api_key,
+                api_version=self.settings.azure_openai_chat_api_version,
+                azure_endpoint=self.settings.azure_openai_endpoint
             )
-            self.chat_deployment = settings.azure_openai_chat_deployment
-            self.embeddings_deployment = settings.azure_openai_embeddings_deployment
-            self.embeddings_api_version = settings.azure_openai_embeddings_api_version
-            logger.info(f"Azure OpenAI client initialized with chat deployment: {self.chat_deployment}")
-        except Exception as e:
-            logger.error(f"Error initializing Azure OpenAI: {e}")
-            raise
+        self.chat_deployment = self.settings.azure_openai_chat_deployment
+        self.embeddings_deployment = self.settings.azure_openai_embeddings_deployment
+        self.embeddings_api_version = self.settings.azure_openai_embeddings_api_version
+        self.logger.info(f"Azure OpenAI client initialized with chat deployment: {self.chat_deployment}")
     
     def generate_embedding(self, text: str) -> Optional[List[float]]:
         """
@@ -46,11 +51,11 @@ class AzureOpenAIService:
             )
             
             embedding = response.data[0].embedding
-            logger.debug(f"Embedding generated for text of {len(text)} characters")
+            self.logger.debug(f"Embedding generated for text of {len(text)} characters")
             return embedding
             
         except Exception as e:
-            logger.error(f"Error generating embedding: {e}")
+            self.logger.error(f"Error generating embedding: {e}")
             return None
     
     def generate_text(self, prompt: str, max_tokens: Optional[int] = None) -> Optional[str]:
@@ -80,13 +85,13 @@ class AzureOpenAIService:
             
             generated_text = response.choices[0].message.content
             if generated_text is not None:
-                logger.debug(f"Text generated: {len(generated_text)} characters")
+                self.logger.debug(f"Text generated: {len(generated_text)} characters")
             else:
-                logger.debug("Text generated: None")
+                self.logger.debug("Text generated: None")
             return generated_text
             
         except Exception as e:
-            logger.error(f"Error generating text: {e}")
+            self.logger.error(f"Error generating text: {e}")
             return None
     
     def generate_chat_response(self, messages: Sequence[Dict[str, str]], max_tokens: Optional[int] = None) -> Optional[str]:
@@ -115,13 +120,13 @@ class AzureOpenAIService:
             )
             generated_text = response.choices[0].message.content
             if generated_text is not None:
-                logger.debug(f"Chat response generated: {len(generated_text)} characters")
+                self.logger.debug(f"Chat response generated: {len(generated_text)} characters")
             else:
-                logger.debug("Chat response generated: None")
+                self.logger.debug("Chat response generated: None")
             return generated_text
             
         except Exception as e:
-            logger.error(f"Error generating chat response: {e}")
+            self.logger.error(f"Error generating chat response: {e}")
             return None
     
     def analyze_sentiment(self, text: str) -> Optional[Dict[str, Any]]:
@@ -154,7 +159,7 @@ class AzureOpenAIService:
             return None
             
         except Exception as e:
-            logger.error(f"Error analyzing sentiment: {e}")
+            self.logger.error(f"Error analyzing sentiment: {e}")
             return None
     
     def extract_keywords(self, text: str) -> Optional[List[str]]:
@@ -182,7 +187,7 @@ class AzureOpenAIService:
             return None
             
         except Exception as e:
-            logger.error(f"Error extracting keywords: {e}")
+            self.logger.error(f"Error extracting keywords: {e}")
             return None
     
     def generate_chat_response_with_context(self, user_number: str, message: str, conversation_context: Optional[List[Dict[str, Any]]] = None) -> Optional[str]:
@@ -227,14 +232,14 @@ class AzureOpenAIService:
             response = self.generate_chat_response(messages, max_tokens=500)
             
             if response:
-                logger.info(f"Generated response for user {user_number}: {len(response)} characters")
+                self.logger.info(f"Generated response for user {user_number}: {len(response)} characters")
             else:
-                logger.warning(f"Failed to generate response for user {user_number}")
+                self.logger.warning(f"Failed to generate response for user {user_number}")
             
             return response
             
         except Exception as e:
-            logger.error(f"Error generating chat response with context for user {user_number}: {e}")
+            self.logger.error(f"Error generating chat response with context for user {user_number}: {e}")
             return None
 
 

@@ -7,19 +7,40 @@ from typing import Optional, Dict, Any, List
 from datetime import datetime
 from azure.storage.blob import BlobServiceClient
 from config.settings import settings
+import re
 
 logger = logging.getLogger(__name__)
+
+
+def sanitize_blob_name(name: str) -> str:
+    """
+    Sanitiza el nombre del blob para cumplir con las reglas de Azure Storage.
+    Reemplaza espacios y caracteres no válidos, y evita / al inicio o final.
+    """
+    name = name.strip().replace(' ', '_')
+    name = re.sub(r'[^a-zA-Z0-9/._-]', '', name)
+    name = name.strip('/')
+    return name
 
 
 class AzureBlobService:
     """Servicio para interactuar con Azure Blob Storage."""
     
-    def __init__(self):
-        """Inicializar cliente de Azure Blob Storage."""
-        self._blob_service_client = None
-        self._container_client = None
-        self._initialized = False
-        self.container_name = settings.blob_container_name
+    def __init__(
+        self,
+        blob_service_client=None,
+        container_client=None,
+        logger_instance=None,
+        container_name=None,
+        settings_instance=None
+    ):
+        """Inicializar cliente de Azure Blob Storage con inyección de dependencias opcional."""
+        self._blob_service_client = blob_service_client
+        self._container_client = container_client
+        self._initialized = blob_service_client is not None and container_client is not None
+        self.settings = settings_instance or settings
+        self.container_name = container_name or self.settings.blob_container_name
+        self.logger = logger_instance or logger
     
     def _initialize_client(self):
         """Inicializar el cliente de Azure Blob Storage de forma lazy."""
@@ -28,11 +49,11 @@ class AzureBlobService:
             
         try:
             # Verificar que la cadena de conexión no esté vacía
-            if not settings.azure_storage_connection_string:
+            if not self.settings.azure_storage_connection_string:
                 raise ValueError("Azure Storage connection string is not configured")
                 
             self._blob_service_client = BlobServiceClient.from_connection_string(
-                settings.azure_storage_connection_string
+                self.settings.azure_storage_connection_string
             )
             self._container_client = self._blob_service_client.get_container_client(
                 self.container_name
@@ -41,12 +62,12 @@ class AzureBlobService:
             # Crear contenedor si no existe
             self._ensure_container_exists()
             self._initialized = True
-            logger.info(f"Cliente Azure Blob Storage inicializado para contenedor: {self.container_name}")
+            self.logger.info(f"Cliente Azure Blob Storage inicializado para contenedor: {self.container_name}")
         except Exception as e:
-            logger.error(f"Error al inicializar Azure Blob Storage: {e}")
+            self.logger.error(f"Error al inicializar Azure Blob Storage: {e}")
             # En entorno de prueba, no lanzar excepción
-            if settings.environment == "test":
-                logger.warning("Azure Blob Storage no disponible en entorno de prueba")
+            if self.settings.environment == "test":
+                self.logger.warning("Azure Blob Storage no disponible en entorno de prueba")
                 return
             raise
     
@@ -73,7 +94,7 @@ class AzureBlobService:
         except Exception:
             if self._blob_service_client is not None:
                 self._blob_service_client.create_container(self.container_name)
-                logger.info(f"Contenedor {self.container_name} creado")
+                self.logger.info(f"Contenedor {self.container_name} creado")
     
     def upload_text(self, blob_name: str, text: str, metadata: Optional[Dict[str, str]] = None) -> bool:
         """
@@ -88,18 +109,19 @@ class AzureBlobService:
             True si se subió correctamente
         """
         try:
+            blob_name = sanitize_blob_name(blob_name)
             if not self._initialized:
                 self._initialize_client()
                 if not self._initialized:
-                    logger.warning("Azure Blob Storage no disponible")
+                    self.logger.warning("Azure Blob Storage no disponible")
                     return False
             assert self._container_client is not None
             blob_client = self._container_client.get_blob_client(blob_name)
             blob_client.upload_blob(text, overwrite=True, metadata=metadata)
-            logger.debug(f"Texto subido como blob: {blob_name}")
+            self.logger.debug(f"Texto subido como blob: {blob_name}")
             return True
         except Exception as e:
-            logger.error(f"Error al subir texto como blob {blob_name}: {e}")
+            self.logger.error(f"Error al subir texto como blob {blob_name}: {e}")
             return False
     
     def upload_json(self, blob_name: str, data: Dict[str, Any], metadata: Optional[Dict[str, str]] = None) -> bool:
@@ -115,10 +137,11 @@ class AzureBlobService:
             True si se subió correctamente
         """
         try:
+            blob_name = sanitize_blob_name(blob_name)
             json_text = json.dumps(data, ensure_ascii=False, indent=2)
             return self.upload_text(blob_name, json_text, metadata)
         except Exception as e:
-            logger.error(f"Error al subir JSON como blob {blob_name}: {e}")
+            self.logger.error(f"Error al subir JSON como blob {blob_name}: {e}")
             return False
     
     def download_text(self, blob_name: str) -> Optional[str]:
@@ -132,19 +155,20 @@ class AzureBlobService:
             Texto del blob o None si hay error
         """
         try:
+            blob_name = sanitize_blob_name(blob_name)
             if not self._initialized:
                 self._initialize_client()
                 if not self._initialized or self._container_client is None:
-                    logger.warning("Azure Blob Storage no disponible")
+                    self.logger.warning("Azure Blob Storage no disponible")
                     return None
             assert self._container_client is not None
             blob_client = self._container_client.get_blob_client(blob_name)
             download_stream = blob_client.download_blob()
             text = download_stream.readall().decode('utf-8')
-            logger.debug(f"Texto descargado del blob: {blob_name}")
+            self.logger.debug(f"Texto descargado del blob: {blob_name}")
             return text
         except Exception as e:
-            logger.error(f"Error al descargar texto del blob {blob_name}: {e}")
+            self.logger.error(f"Error al descargar texto del blob {blob_name}: {e}")
             return None
     
     def download_json(self, blob_name: str) -> Optional[Dict[str, Any]]:
@@ -158,12 +182,13 @@ class AzureBlobService:
             Datos JSON del blob o None si hay error
         """
         try:
+            blob_name = sanitize_blob_name(blob_name)
             text = self.download_text(blob_name)
             if text:
                 return json.loads(text)
             return None
         except Exception as e:
-            logger.error(f"Error al descargar JSON del blob {blob_name}: {e}")
+            self.logger.error(f"Error al descargar JSON del blob {blob_name}: {e}")
             return None
     
     def delete_blob(self, blob_name: str) -> bool:
@@ -177,13 +202,14 @@ class AzureBlobService:
             True si se eliminó correctamente
         """
         try:
+            blob_name = sanitize_blob_name(blob_name)
             assert self._container_client is not None
             blob_client = self._container_client.get_blob_client(blob_name)
             blob_client.delete_blob()
-            logger.debug(f"Blob eliminado: {blob_name}")
+            self.logger.debug(f"Blob eliminado: {blob_name}")
             return True
         except Exception as e:
-            logger.error(f"Error al eliminar blob {blob_name}: {e}")
+            self.logger.error(f"Error al eliminar blob {blob_name}: {e}")
             return False
     
     def list_blobs(self, name_starts_with: Optional[str] = None) -> List[str]:
@@ -200,10 +226,10 @@ class AzureBlobService:
             assert self._container_client is not None
             blobs = self._container_client.list_blobs(name_starts_with=name_starts_with)
             blob_names = [blob.name for blob in blobs]
-            logger.debug(f"Listados {len(blob_names)} blobs")
+            self.logger.debug(f"Listados {len(blob_names)} blobs")
             return blob_names
         except Exception as e:
-            logger.error(f"Error al listar blobs: {e}")
+            self.logger.error(f"Error al listar blobs: {e}")
             return []
     
     def blob_exists(self, blob_name: str) -> bool:
@@ -235,12 +261,13 @@ class AzureBlobService:
             Metadatos del blob o None si hay error
         """
         try:
+            blob_name = sanitize_blob_name(blob_name)
             assert self._container_client is not None
             blob_client = self._container_client.get_blob_client(blob_name)
             properties = blob_client.get_blob_properties()
             return properties.metadata
         except Exception as e:
-            logger.error(f"Error al obtener metadatos del blob {blob_name}: {e}")
+            self.logger.error(f"Error al obtener metadatos del blob {blob_name}: {e}")
             return None
     
     def save_conversation(self, conversation_id: str, messages: List[Dict[str, Any]]) -> bool:
@@ -255,6 +282,7 @@ class AzureBlobService:
             True si se guardó correctamente
         """
         try:
+            conversation_id = sanitize_blob_name(conversation_id)
             timestamp = datetime.utcnow().isoformat()
             data = {
                 "conversation_id": conversation_id,
@@ -271,7 +299,7 @@ class AzureBlobService:
             
             return self.upload_json(blob_name, data, metadata)
         except Exception as e:
-            logger.error(f"Error al guardar conversación {conversation_id}: {e}")
+            self.logger.error(f"Error al guardar conversación {conversation_id}: {e}")
             return False
     
     def load_conversation(self, conversation_id: str) -> Optional[Dict[str, Any]]:
@@ -285,10 +313,11 @@ class AzureBlobService:
             Datos de la conversación o None si no existe
         """
         try:
+            conversation_id = sanitize_blob_name(conversation_id)
             blob_name = f"conversations/{conversation_id}.json"
             return self.download_json(blob_name)
         except Exception as e:
-            logger.error(f"Error al cargar conversación {conversation_id}: {e}")
+            self.logger.error(f"Error al cargar conversación {conversation_id}: {e}")
             return None
     
     def download_file(self, blob_name: str, local_file_path: str) -> bool:
@@ -303,15 +332,16 @@ class AzureBlobService:
             True if download successful
         """
         try:
+            blob_name = sanitize_blob_name(blob_name)
             assert self._container_client is not None
             blob_client = self._container_client.get_blob_client(blob_name)
             with open(local_file_path, "wb") as download_file:
                 download_stream = blob_client.download_blob()
                 download_file.write(download_stream.readall())
-            logger.info(f"File downloaded from blob: {blob_name}")
+            self.logger.info(f"File downloaded from blob: {blob_name}")
             return True
         except Exception as e:
-            logger.error(f"Error downloading file from blob {blob_name}: {e}")
+            self.logger.error(f"Error downloading file from blob {blob_name}: {e}")
             return False
     
     def update_blob_metadata(self, blob_name: str, metadata: Dict[str, str]) -> bool:
@@ -326,13 +356,14 @@ class AzureBlobService:
             True if update successful
         """
         try:
+            blob_name = sanitize_blob_name(blob_name)
             assert self._container_client is not None
             blob_client = self._container_client.get_blob_client(blob_name)
             blob_client.set_blob_metadata(metadata)
-            logger.info(f"Metadata updated for blob: {blob_name}")
+            self.logger.info(f"Metadata updated for blob: {blob_name}")
             return True
         except Exception as e:
-            logger.error(f"Error updating metadata for blob {blob_name}: {e}")
+            self.logger.error(f"Error updating metadata for blob {blob_name}: {e}")
             return False
 
 

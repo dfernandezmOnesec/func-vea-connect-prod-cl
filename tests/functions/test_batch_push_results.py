@@ -4,7 +4,7 @@ Unit tests for Batch Push Results Function.
 from unittest.mock import Mock, patch
 import json
 import azure.functions as func
-from functions.batch_push_results import main
+from batch_push_results import main
 import pytest
 
 
@@ -15,7 +15,7 @@ class TestBatchPushResultsFunction:
         """Set up test fixtures."""
         self.mock_queue_message = Mock(spec=func.QueueMessage)
     
-    @patch('functions.batch_push_results.DocumentProcessor')
+    @patch('batch_push_results.DocumentProcessor')
     def test_main_successful_processing(self, mock_document_processor_class):
         """Test successful document processing."""
         # Arrange
@@ -42,7 +42,7 @@ class TestBatchPushResultsFunction:
             content_type="application/pdf"
         )
     
-    @patch('functions.batch_push_results.DocumentProcessor')
+    @patch('batch_push_results.DocumentProcessor')
     def test_main_processing_failure(self, mock_document_processor_class):
         """Test document processing failure."""
         # Arrange
@@ -84,14 +84,14 @@ class TestBatchPushResultsFunction:
         self.mock_queue_message.get_body.return_value = b"invalid json"
 
         # Act & Assert
-        with patch('functions.batch_push_results.logger') as mock_logger:
+        with patch('batch_push_results.logger') as mock_logger:
             with pytest.raises(json.JSONDecodeError):
                 main(self.mock_queue_message)
             
             # Verify that error was logged
             mock_logger.error.assert_called_with("Failed to parse queue message JSON: Expecting value: line 1 column 1 (char 0)")
     
-    @patch('functions.batch_push_results.DocumentProcessor')
+    @patch('batch_push_results.DocumentProcessor')
     def test_main_processor_exception(self, mock_document_processor_class):
         """Test processor exception handling."""
         # Arrange
@@ -107,7 +107,7 @@ class TestBatchPushResultsFunction:
         mock_document_processor_class.return_value = mock_processor_instance
 
         # Act & Assert
-        with patch('functions.batch_push_results.logger') as mock_logger:
+        with patch('batch_push_results.logger') as mock_logger:
             with pytest.raises(Exception):
                 main(self.mock_queue_message)
             # Se puede verificar que el logger registró el error si se desea

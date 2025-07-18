@@ -17,17 +17,25 @@ logging.basicConfig(level=getattr(logging, settings.log_level.upper(), logging.I
 logger = logging.getLogger(__name__)
 
 
-def main(req: func.HttpRequest) -> func.HttpResponse:
+def main(req: func.HttpRequest, azure_blob_service_instance=None, redis_service_instance=None, embedding_manager_instance=None, logger_instance=None) -> func.HttpResponse:
     """
     Main function to delete documents.
     
     Args:
         req: HTTP request from Azure Functions
+        azure_blob_service_instance: instancia de azure_blob_service (opcional)
+        redis_service_instance: instancia de redis_service (opcional)
+        embedding_manager_instance: instancia de embedding_manager (opcional)
+        logger_instance: instancia de logger (opcional)
         
     Returns:
         HttpResponse with result
     """
-    logger.info("[AUDIT] Entró a delete_document_function.main")
+    blob_service = azure_blob_service_instance or azure_blob_service
+    redis_srv = redis_service_instance or redis_service
+    embed_mgr = embedding_manager_instance or embedding_manager
+    log = logger_instance or logger
+    log.info("[AUDIT] Entró a delete_document_function.main")
     try:
         
         # Check HTTP method
@@ -69,7 +77,13 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
         blob_name = body.get('blob_name')
         
         # Delete document from all services
-        deletion_result = delete_document_completely(document_id, blob_name)
+        deletion_result = delete_document_completely(
+            document_id, blob_name,
+            azure_blob_service_instance=blob_service,
+            redis_service_instance=redis_srv,
+            embedding_manager_instance=embed_mgr,
+            logger_instance=log
+        )
         
         if deletion_result['success']:
             return func.HttpResponse(
@@ -99,7 +113,7 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
             )
             
     except Exception as e:
-        logger.error(f"Error in delete document function: {e}")
+        log.error(f"Error in delete document function: {e}")
         return func.HttpResponse(
             json.dumps({
                 "success": False,
@@ -111,17 +125,25 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
         )
 
 
-def delete_document_completely(document_id: Optional[str] = None, blob_name: Optional[str] = None) -> Dict[str, Any]:
+def delete_document_completely(document_id: Optional[str] = None, blob_name: Optional[str] = None, azure_blob_service_instance=None, redis_service_instance=None, embedding_manager_instance=None, logger_instance=None) -> Dict[str, Any]:
     """
     Delete document from all services (Storage, Redis, Embeddings).
     
     Args:
         document_id: Document ID to delete
         blob_name: Blob name to delete
+        azure_blob_service_instance: instancia de azure_blob_service (opcional)
+        redis_service_instance: instancia de redis_service (opcional)
+        embedding_manager_instance: instancia de embedding_manager (opcional)
+        logger_instance: instancia de logger (opcional)
         
     Returns:
         Dictionary with deletion results
     """
+    blob_service = azure_blob_service_instance or azure_blob_service
+    redis_srv = redis_service_instance or redis_service
+    embed_mgr = embedding_manager_instance or embedding_manager
+    log = logger_instance or logger
     deletion_details = {
         'storage_deleted': False,
         'redis_deleted': False,
@@ -132,12 +154,12 @@ def delete_document_completely(document_id: Optional[str] = None, blob_name: Opt
     try:
         # 1. Delete from Azure Storage
         if blob_name:
-            storage_deleted = azure_blob_service.delete_blob(blob_name)
+            storage_deleted = blob_service.delete_blob(blob_name)
             deletion_details['storage_deleted'] = storage_deleted
             if not storage_deleted:
                 deletion_details['errors'].append(f"Failed to delete blob: {blob_name}")
             else:
-                logger.info(f"Blob deleted from storage: {blob_name}")
+                log.info(f"Blob deleted from storage: {blob_name}")
         
         # 2. Delete from Redis (embeddings and metadata)
         if document_id:
@@ -150,8 +172,8 @@ def delete_document_completely(document_id: Optional[str] = None, blob_name: Opt
             
             redis_deleted = True
             for key in embedding_keys:
-                if redis_service.delete(key):
-                    logger.info(f"Redis key deleted: {key}")
+                if redis_srv.delete(key):
+                    log.info(f"Redis key deleted: {key}")
                 else:
                     redis_deleted = False
                     deletion_details['errors'].append(f"Failed to delete Redis key: {key}")
@@ -161,15 +183,15 @@ def delete_document_completely(document_id: Optional[str] = None, blob_name: Opt
         # 3. Delete from embedding manager
         if document_id:
             try:
-                embeddings_deleted = embedding_manager.delete_document_embeddings(document_id)
+                embeddings_deleted = embed_mgr.delete_document_embeddings(document_id)
                 deletion_details['embeddings_deleted'] = embeddings_deleted
                 if not embeddings_deleted:
                     deletion_details['errors'].append(f"Failed to delete embeddings for document: {document_id}")
                 else:
-                    logger.info(f"Embeddings deleted for document: {document_id}")
+                    log.info(f"Embeddings deleted for document: {document_id}")
             except Exception as e:
                 deletion_details['errors'].append(f"Error deleting embeddings: {str(e)}")
-                logger.error(f"Error deleting embeddings for {document_id}: {e}")
+                log.error(f"Error deleting embeddings for {document_id}: {e}")
         
         # Determine overall success
         success = (
@@ -181,9 +203,9 @@ def delete_document_completely(document_id: Optional[str] = None, blob_name: Opt
         overall_success = all(success)
         
         if overall_success:
-            logger.info(f"Document deleted successfully - Document ID: {document_id}, Blob: {blob_name}")
+            log.info(f"Document deleted successfully - Document ID: {document_id}, Blob: {blob_name}")
         else:
-            logger.warning(f"Partial deletion - Document ID: {document_id}, Blob: {blob_name}, Details: {deletion_details}")
+            log.warning(f"Partial deletion - Document ID: {document_id}, Blob: {blob_name}, Details: {deletion_details}")
         
         return {
             'success': overall_success,
@@ -193,7 +215,7 @@ def delete_document_completely(document_id: Optional[str] = None, blob_name: Opt
         
     except Exception as e:
         error_msg = f"Error in delete_document_completely: {str(e)}"
-        logger.error(error_msg)
+        log.error(error_msg)
         deletion_details['errors'].append(error_msg)
         return {
             'success': False,

@@ -126,14 +126,14 @@ def process_incoming_whatsapp_message(from_number: str, message_content: str, me
         if "donativo" in msg:
             template_name = "vea_info_donativos"
             parameters = [
-                "Juan Pérez",           # customer_name
-                "Ministerio Esperanza", # ministry_name
-                "BBVA",                 # bank_name
-                "Iglesia Esperanza",    # beneficiary_name
-                "1234567890",           # account_number
-                "012345678901234567",   # clabe_number
-                "Padre Juan",           # contact_name
-                "5551234567"            # contact_phone
+                {"name": "customer_name", "value": "Juan Pérez"},
+                {"name": "ministry_name", "value": "Ministerio Esperanza"},
+                {"name": "bank_name", "value": "BBVA"},
+                {"name": "beneficiary_name", "value": "Iglesia Esperanza"},
+                {"name": "account_number", "value": "1234567890"},
+                {"name": "clabe_number", "value": "012345678901234567"},
+                {"name": "contact_name", "value": "Padre Juan"},
+                {"name": "contact_phone", "value": "5551234567"}
             ]
         elif "evento" in msg:
             template_name = "vea_event_info"
@@ -158,11 +158,13 @@ def process_incoming_whatsapp_message(from_number: str, message_content: str, me
                 "Solicitud de oración"  # request_summary
             ]
         else:
-            # Si no coincide, responde con texto simple o una plantilla por defecto
-            response_text = "¡Hola! Puedes escribir 'donativo', 'evento', 'contacto' o 'solicitud' para recibir información."
-            sent_message_id = acs_service.send_whatsapp_text_message(from_number, response_text)
+            # Si no coincide, responde usando IA generativa
+            ai_response = generate_response_with_rag(message_content, from_number)
+            if not ai_response:
+                ai_response = "¡Hola! Puedes escribir 'donativo', 'evento', 'contacto' o 'solicitud' para recibir información."
+            sent_message_id = acs_service.send_whatsapp_text_message(from_number, ai_response)
             if sent_message_id:
-                save_conversation_with_context(from_number, message_content, response_text, timestamp, message_id, sent_message_id)
+                save_conversation_with_context(from_number, message_content, ai_response, timestamp, message_id, sent_message_id)
                 logger.info(f"Response sent to {from_number}, message ID: {sent_message_id}")
             else:
                 logger.error(f"Failed to send response to {from_number}")
@@ -186,140 +188,145 @@ def process_incoming_whatsapp_message(from_number: str, message_content: str, me
         logger.error(f"Error processing incoming WhatsApp message: {e}")
 
 
-def generate_response_with_rag(user_message: str, user_number: str) -> Optional[str]:
+def generate_response_with_rag(
+    user_message: str,
+    user_number: str,
+    embedding_manager=embedding_manager,
+    openai_service=openai_service,
+    logger=logger
+) -> str | None:
     """
     Generate response using OpenAI with RAG (Retrieval-Augmented Generation).
-    
     Args:
         user_message: User message
         user_number: User phone number
-        
+        embedding_manager: gestor de embeddings/contexto (mockeable)
+        openai_service: servicio de openai (mockeable)
+        logger: logger (mockeable)
     Returns:
         Generated response or None if error
     """
     try:
         # Get embedding for user message
         user_embedding = embedding_manager.get_embedding(user_message)
-        
+        if user_embedding is None:
+            return None
         # Find similar content using RAG
-        if user_embedding is not None:
-            similar_content = embedding_manager.find_similar_content(user_embedding, top_k=3)
-        else:
-            similar_content = None
-        
+        similar_content = embedding_manager.find_similar_content(user_embedding, top_k=3)
         # Load conversation history with Redis for active context
-        conversation_history = load_conversation_history_with_redis(user_number)
-        
+        conversation_history = load_conversation_history_with_redis(user_number, embedding_manager=embedding_manager, logger=logger)
         # Prepare messages for OpenAI with RAG context
         messages = []
-        
         # Add system context with RAG information
         system_context = "You are a helpful and friendly assistant for WhatsApp. Respond clearly and concisely."
         if similar_content:
             system_context += f"\n\nRelevant context for this conversation:\n{similar_content}"
-        
         messages.append({
             "role": "system",
             "content": system_context
         })
-        
         # Add conversation history (last 10 messages for better context)
         for msg in conversation_history[-10:]:
             messages.append({
                 "role": msg["role"],
                 "content": msg["content"]
             })
-        
         # Add current message
         messages.append({
             "role": "user",
             "content": user_message
         })
-        
         # Generate response
         response = openai_service.generate_chat_response(messages)
-        
         return response
-        
     except Exception as e:
         logger.error(f"Error generating response with RAG: {e}")
         return None
 
 
-def save_conversation_with_context(user_number: str, user_message: str, bot_response: str, 
-                                 timestamp: str, incoming_message_id: str, outgoing_message_id: str) -> None:
+def save_conversation_with_context(
+    user_number: str,
+    user_message: str,
+    bot_response: str,
+    timestamp: str,
+    incoming_id: str,
+    outgoing_id: str,
+    embedding_manager=embedding_manager,
+    azure_blob_service=azure_blob_service,
+    logger=logger
+) -> None:
     """
-    Save conversation to both Azure Blob Storage and Redis for active context.
-    
+    Guarda la conversación con contexto en Blob y Redis.
     Args:
-        user_number: User phone number
-        user_message: User message
-        bot_response: Bot response
-        timestamp: Message timestamp
-        incoming_message_id: Incoming message ID
-        outgoing_message_id: Outgoing message ID
+        user_number: número del usuario
+        user_message: mensaje del usuario
+        bot_response: respuesta del bot
+        timestamp: timestamp del mensaje
+        incoming_id: id del mensaje entrante
+        outgoing_id: id del mensaje saliente
+        embedding_manager: gestor de embeddings/contexto (mockeable)
+        azure_blob_service: servicio de blob (mockeable)
+        logger: logger (mockeable)
     """
     try:
-        conversation_id = f"acs_{user_number}"
-        
-        # Prepare conversation data
-        conversation_data = {
-            "conversation_id": conversation_id,
+        # Cargar conversación existente
+        conversation = azure_blob_service.load_conversation(user_number) or {
+            "conversation_id": f"acs_{user_number}",
             "user_number": user_number,
             "messages": []
         }
-        
-        # Load existing conversation from blob
-        existing_data = azure_blob_service.load_conversation(conversation_id)
-        if existing_data and "messages" in existing_data:
-            conversation_data["messages"] = existing_data["messages"]
-        
-        # Add user message
-        user_msg = {
-            "timestamp": timestamp,
+        # Agregar mensajes
+        conversation["messages"].append({
             "role": "user",
             "content": user_message,
-            "message_id": incoming_message_id,
-            "direction": "incoming"
-        }
-        conversation_data["messages"].append(user_msg)
-        
-        # Add bot response
-        bot_msg = {
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": timestamp,
+            "message_id": incoming_id
+        })
+        conversation["messages"].append({
             "role": "assistant",
             "content": bot_response,
-            "message_id": outgoing_message_id,
-            "direction": "outgoing"
-        }
-        conversation_data["messages"].append(bot_msg)
-        
-        # Save to blob storage for long-term storage
-        azure_blob_service.save_conversation(conversation_id, conversation_data["messages"])
-        
-        # Save to Redis for active context (last 20 messages)
-        active_context = conversation_data["messages"][-20:]
-        redis_service.save_conversation_context(conversation_id, active_context)
-        
+            "timestamp": timestamp,
+            "message_id": outgoing_id
+        })
+        # Guardar en Blob
+        azure_blob_service.save_conversation(conversation)
+        # Guardar en Redis/contexto
+        embedding_manager.save_conversation_context(user_number, conversation["messages"])
+        logger.debug(f"Conversación guardada para {user_number}")
     except Exception as e:
-        logger.error(f"Error saving conversation with context: {e}")
+        logger.error(f"Error guardando conversación: {e}")
 
 
-def load_conversation_history_with_redis(user_number: str) -> List[Dict[str, Any]]:
+def load_conversation_history_with_redis(
+    user_number: str,
+    embedding_manager=embedding_manager,
+    azure_blob_service=azure_blob_service,
+    logger=logger
+) -> list:
     """
-    Load conversation history from Redis for active context.
-    
+    Load conversation history for a user, first from Redis, then fallback to Blob Storage.
     Args:
         user_number: User phone number
-        
+        embedding_manager: gestor de embeddings/contexto (mockeable)
+        azure_blob_service: servicio de blob (mockeable)
+        logger: logger (mockeable)
     Returns:
         List of conversation messages
     """
     try:
-        conversation_id = f"acs_{user_number}"
-        context = redis_service.load_conversation_context(conversation_id)
+        # Primero intenta cargar de Redis
+        context = embedding_manager.get_conversation_context(user_number)
         if context:
+            logger.debug(f"Contexto cargado de Redis para {user_number}")
             return context
+        # Si no hay en Redis, intenta cargar de Blob
+        blob_data = azure_blob_service.load_conversation(user_number)
+        if blob_data and "messages" in blob_data:
+            logger.debug(f"Contexto cargado de Blob para {user_number}")
+            # Guarda en Redis para futuras consultas
+            embedding_manager.save_conversation_context(user_number, blob_data["messages"])
+            return blob_data["messages"]
+        logger.debug(f"No se encontró contexto para {user_number}")
         return []
     except Exception as e:
         logger.error(f"Error loading conversation history from Redis: {e}")

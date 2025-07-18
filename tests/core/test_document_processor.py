@@ -1,7 +1,7 @@
 """
 Unit tests for Document Processor.
 """
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, patch, MagicMock
 from core.document_processor import DocumentProcessor
 
 
@@ -10,18 +10,17 @@ class TestDocumentProcessor:
     
     def setup_method(self):
         """Set up test fixtures."""
-        # Mock all dependencies
-        with patch('core.document_processor.azure_blob_service') as mock_blob, \
-             patch('core.document_processor.openai_service') as mock_openai, \
-             patch('core.document_processor.redis_service') as mock_redis, \
-             patch('core.document_processor.computer_vision_service') as mock_cv:
-            
-            self.mock_blob_service = mock_blob
-            self.mock_openai_service = mock_openai
-            self.mock_redis_service = mock_redis
-            self.mock_vision_service = mock_cv
-            
-            self.processor = DocumentProcessor()
+        # Mock all dependencies explícitamente
+        self.mock_blob_service = Mock()
+        self.mock_openai_service = Mock()
+        self.mock_redis_service = Mock()
+        self.mock_vision_service = Mock()
+        self.processor = DocumentProcessor(
+            blob_service=self.mock_blob_service,
+            openai_service=self.mock_openai_service,
+            redis_service=self.mock_redis_service,
+            vision_service=self.mock_vision_service
+        )
     
     def test_init_success(self):
         """Test successful initialization."""
@@ -460,3 +459,33 @@ class TestDocumentProcessor:
         assert "error" in result
         assert "Failed to process document" in result["error"]
         assert "processing_id" in result  # Should still have processing ID for tracking 
+    
+    def test_process_pdf_scanned(self):
+        """Test procesamiento de PDF escaneado usando visión computacional."""
+        from unittest.mock import MagicMock
+        processor = self.processor
+        processor.vision_service.extract_text_from_image_bytes.return_value = "Texto extraído de imagen PDF"
+        processor.openai_service.generate_embedding.return_value = [0.1, 0.2, 0.3]
+        processor.redis_service.set_cache.return_value = True
+        # Simular PDF escaneado (sin texto, pero con imágenes)
+        with patch('fitz.open') as mock_fitz_open, patch('pypdf.PdfReader') as mock_pdf_reader:
+            mock_doc = MagicMock()
+            mock_page = Mock()
+            mock_page.get_images.return_value = [(1,)]
+            mock_page.load_page.return_value = mock_page
+            mock_doc.load_page.return_value = mock_page
+            mock_doc.get_images.return_value = [(1,)]
+            mock_doc.extract_image.return_value = {'image': b'fake_image_bytes'}
+            mock_doc.__len__.return_value = 1
+            mock_fitz_open.return_value = mock_doc
+            # Mock PdfReader para que .pages sea vacío (simula PDF escaneado)
+            mock_pdf = MagicMock()
+            mock_pdf.pages = []
+            mock_pdf_reader.return_value = mock_pdf
+            fake_blob_stream = Mock()
+            fake_blob_stream.read.return_value = b"fake_pdf_bytes"
+            result = processor.process_document_from_blob(fake_blob_stream, "archivo.pdf")
+            assert result is True
+            processor.vision_service.extract_text_from_image_bytes.assert_called()
+            processor.openai_service.generate_embedding.assert_called()
+            processor.redis_service.set_cache.assert_called() 

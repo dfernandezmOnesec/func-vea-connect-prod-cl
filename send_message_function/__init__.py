@@ -26,14 +26,21 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
     Returns:
         HttpResponse with result
     """
-    logger.info("[AUDIT] Entró a send_message_function.main")
+    acs = acs_service
+    blob_service = azure_blob_service
+    log = logger
+    log.info("[AUDIT] Entró a send_message_function.main")
     try:
         
         # Check HTTP method
         if req.method != "POST":
             return func.HttpResponse(
-                "Method not allowed. Use POST.",
-                status_code=405
+                json.dumps({
+                    "success": False,
+                    "message": "Method not allowed. Use POST."
+                }),
+                status_code=405,
+                mimetype='application/json'
             )
         
         # Get request data
@@ -42,8 +49,12 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
         # Validate required data
         if not body:
             return func.HttpResponse(
-                "Empty request body",
-                status_code=400
+                json.dumps({
+                    "success": False,
+                    "message": "Empty request body"
+                }),
+                status_code=400,
+                mimetype='application/json'
             )
         
         to_number = body.get('to_number')
@@ -51,12 +62,16 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
         
         if not to_number or not message:
             return func.HttpResponse(
-                "Missing required parameters: to_number, message",
-                status_code=400
+                json.dumps({
+                    "success": False,
+                    "message": "Missing required parameters: to_number, message"
+                }),
+                status_code=400,
+                mimetype='application/json'
             )
         
         # Validate phone number
-        if not acs_service.validate_phone_number(to_number):
+        if not acs.validate_phone_number(to_number):
             return func.HttpResponse(
                 json.dumps({
                     "success": False,
@@ -68,7 +83,7 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
             )
         
         # Send message
-        message_id = acs_service.send_whatsapp_text_message(to_number, message)
+        message_id = acs.send_whatsapp_text_message(to_number, message)
         
         if message_id:
             # Save to history
@@ -97,7 +112,7 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
             )
             
     except Exception as e:
-        logger.error(f"Error in send message function: {e}")
+        log.error(f"Error in send message function: {e}")
         return func.HttpResponse(
             json.dumps({
                 "success": False,
@@ -109,7 +124,7 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
         )
 
 
-def save_outgoing_message(to_number: str, message: str, message_id: str) -> None:
+def save_outgoing_message(to_number: str, message: str, message_id: str, azure_blob_service_instance=None, logger_instance=None) -> None:
     """
     Save outgoing message to Azure Blob Storage.
     
@@ -117,12 +132,16 @@ def save_outgoing_message(to_number: str, message: str, message_id: str) -> None
         to_number: Destination phone number
         message: Message content
         message_id: Message ID from ACS
+        azure_blob_service_instance: instancia de azure_blob_service (opcional)
+        logger_instance: instancia de logger (opcional)
     """
+    blob_service = azure_blob_service_instance or azure_blob_service
+    log = logger_instance or logger
     try:
         conversation_id = f"acs_{to_number}"
         
         # Load existing conversation
-        conversation_data = azure_blob_service.load_conversation(conversation_id)
+        conversation_data = blob_service.load_conversation(conversation_id)
         
         if conversation_data is None:
             conversation_data = {
@@ -141,35 +160,41 @@ def save_outgoing_message(to_number: str, message: str, message_id: str) -> None
         })
         
         # Save conversation
-        azure_blob_service.save_conversation(conversation_id, conversation_data["messages"])
+        blob_service.save_conversation(conversation_id, conversation_data["messages"])
         
-        logger.debug(f"Outgoing message saved for {to_number}")
+        log.debug(f"Outgoing message saved for {to_number}")
         
     except Exception as e:
-        logger.error(f"Error saving outgoing message: {e}")
+        log.error(f"Error saving outgoing message: {e}")
 
 
-def get_message_status(message_id: str) -> Optional[Dict[str, Any]]:
+def get_message_status(message_id: str, azure_blob_service_instance=None, acs_service_instance=None, logger_instance=None) -> Optional[Dict[str, Any]]:
     """
     Get status of a sent message.
     
     Args:
         message_id: Message ID
+        azure_blob_service_instance: instancia de azure_blob_service (opcional)
+        acs_service_instance: instancia de acs_service (opcional)
+        logger_instance: instancia de logger (opcional)
         
     Returns:
         Message status or None if not found
     """
+    blob_service = azure_blob_service_instance or azure_blob_service
+    acs = acs_service_instance or acs_service
+    log = logger_instance or logger
     try:
         # Try to get status from blob storage
         blob_name = f"message_status/{message_id}.json"
-        status_data = azure_blob_service.download_json(blob_name)
+        status_data = blob_service.download_json(blob_name)
         
         if status_data:
             return status_data
         
         # Fallback to ACS service
-        return acs_service.get_message_status(message_id)
+        return acs.get_message_status(message_id)
         
     except Exception as e:
-        logger.error(f"Error getting message status: {e}")
+        log.error(f"Error getting message status: {e}")
         return None 

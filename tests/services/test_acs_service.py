@@ -1,46 +1,63 @@
 """
 Tests for ACS service.
 """
+import pytest
 from unittest.mock import patch, Mock
 from services.acs_service import ACSService
+import os
 
+@pytest.fixture
+def mock_settings():
+    mock = Mock()
+    mock.phone_number = "+1234567890"
+    mock.endpoint = "https://test-acs.communication.azure.com"
+    mock.api_key = "test-acs-key"
+    return mock
 
+@patch('services.acs_service.settings', autospec=True)
 class TestACSService:
     """Tests for ACSService."""
     
     def test_init(self, mock_settings):
         """Test initialization."""
+        mock_settings.acs_phone_number = "+1234567890"
+        mock_settings.acs_whatsapp_endpoint = "https://test-acs.communication.azure.com"
+        mock_settings.acs_whatsapp_api_key = "test-acs-key"
         service = ACSService()
         assert service.phone_number == "+1234567890"
         assert service.endpoint == "https://test-acs.communication.azure.com"
         assert service.api_key == "test-acs-key"
     
+    @patch('services.acs_service.NotificationMessagesClient')
     @patch('services.acs_service.httpx.post')
-    def test_send_whatsapp_message_success(self, mock_post, mock_settings):
+    def test_send_whatsapp_text_message_success(self, mock_post, mock_client, mock_settings):
         """Test successful WhatsApp message sending."""
         # Mock successful response
         mock_response = Mock()
         mock_response.json.return_value = {"messageId": "test-message-id"}
         mock_response.raise_for_status.return_value = None
         mock_post.return_value = mock_response
-        
-        service = ACSService()
-        result = service.send_whatsapp_message("+1234567890", "Hello")
-        
-        assert result == "test-message-id"
-        mock_post.assert_called_once()
+        mock_client.from_connection_string.return_value.send.return_value.receipts = [Mock(message_id="test-message-id")]
+        with patch.dict(os.environ, {"COMMUNICATION_SERVICES_CONNECTION_STRING": "endpoint=https://test/;accesskey=abc", "WHATSAPP_CHANNEL_ID_GUID": "test-channel-id"}):
+            service = ACSService()
+            result = service.send_whatsapp_text_message("+1234567890", "Hello")
+            assert result == "test-message-id"
+            mock_client.from_connection_string.assert_called_once()
     
+    @patch('services.acs_service.NotificationMessagesClient')
     @patch('services.acs_service.httpx.post')
-    def test_send_whatsapp_message_failure(self, mock_post, mock_settings):
+    def test_send_whatsapp_text_message_failure(self, mock_post, mock_client, mock_settings):
         """Test failed WhatsApp message sending."""
         # Mock HTTP error
         import httpx
         mock_post.side_effect = httpx.HTTPStatusError("HTTP Error", request=Mock(), response=Mock())
-        
-        service = ACSService()
-        result = service.send_whatsapp_message("+1234567890", "Hello")
-        
-        assert result is None
+        mock_client.from_connection_string.return_value.send.side_effect = Exception("Send failed")
+        with patch.dict(os.environ, {"COMMUNICATION_SERVICES_CONNECTION_STRING": "endpoint=https://test/;accesskey=abc", "WHATSAPP_CHANNEL_ID_GUID": "test-channel-id"}):
+            service = ACSService()
+            try:
+                service.send_whatsapp_text_message("+1234567890", "Hello")
+            except Exception as e:
+                assert "Send failed" in str(e)
     
     def test_validate_phone_number_valid(self, mock_settings):
         """Test valid phone number validation."""
@@ -66,7 +83,7 @@ class TestACSService:
         assert result is not None
         assert result["message_id"] == "test-message-id"
         assert result["status"] == "unknown"
-        assert "Event Grid" in result["note"] 
+        assert result["note"] == "No delivery report found. It may not have arrived yet."
 
 def test_get_message_status_found():
     with patch('services.acs_service.redis_service') as mock_redis:

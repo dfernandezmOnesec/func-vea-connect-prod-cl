@@ -337,6 +337,23 @@ class TestWhatsAppBotIntegration:
         # Verify that ACS service was called but failed
         mock_acs.send_whatsapp_text_message.assert_called_once()
     
+    @patch('services.acs_service.NotificationMessagesClient')
+    @patch('whatsapp_bot_function.acs_service')
+    @patch('whatsapp_bot_function.azure_blob_service')
+    @patch('whatsapp_bot_function.openai_service')
+    def test_bot_response_to_any_message(self, mock_openai, mock_blob, mock_acs, mock_client):
+        """Test que el bot responde a cualquier mensaje usando IA generativa."""
+        from unittest.mock import Mock
+        mock_event = self.create_mock_event("¿Qué actividades hay esta semana?")
+        mock_openai.generate_chat_response_with_context.return_value = "Esta semana hay varias actividades..."
+        mock_acs.send_whatsapp_text_message.return_value = "msg_456"
+        mock_blob.load_conversation.return_value = {"messages": []}
+        mock_blob.save_conversation.return_value = True
+        mock_client.from_connection_string.return_value.send.return_value.receipts = [Mock(message_id="msg_456")]
+        main(mock_event)
+        mock_openai.generate_chat_response_with_context.assert_called()
+        mock_acs.send_whatsapp_text_message.assert_called()
+    
     def test_extract_message_details_valid_event(self):
         """Test message details extraction from valid event."""
         # Arrange

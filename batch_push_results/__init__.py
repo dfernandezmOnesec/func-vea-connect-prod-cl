@@ -69,3 +69,24 @@ def main(msg: func.QueueMessage) -> None:
         error_message = f"Failed to process queue message: {str(e)}"
         logger.error(error_message)
         raise 
+
+# NUEVA FUNCIÓN: Trigger de Blob Storage
+import azure.functions as func_blob
+
+def main_blob(blob: func_blob.InputStream):
+    """
+    Azure Function con trigger de Blob Storage para procesar archivos subidos automáticamente.
+    """
+    logger.info("[AUDIT] Entró a blob_trigger_function.main_blob")
+    try:
+        blob_name = (blob.name or "unknown_blob").split("/")[-1]
+        logger.info(f"Procesando blob subido: {blob_name}")
+        document_processor = DocumentProcessor()
+        success = document_processor.process_document_from_blob(blob, blob_name)
+        if success:
+            logger.info(f"Successfully processed document from blob trigger: {blob_name}")
+        else:
+            logger.error(f"Failed to process document from blob trigger: {blob_name}")
+    except Exception as e:
+        logger.error(f"Error en blob_trigger_function: {e}")
+        raise 

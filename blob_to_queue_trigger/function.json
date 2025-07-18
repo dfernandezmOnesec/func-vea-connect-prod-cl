@@ -1,0 +1,13 @@
+{
+  "scriptFile": "__init__.py",
+  "entryPoint": "main",
+  "bindings": [
+    {
+      "type": "blobTrigger",
+      "name": "blob",
+      "direction": "in",
+      "path": "documents/{name}",
+      "connection": "AzureWebJobsStorage"
+    }
+  ]
+} 

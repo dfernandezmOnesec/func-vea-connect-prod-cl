@@ -5,7 +5,7 @@ import pytest
 import json
 from unittest.mock import Mock, patch, MagicMock
 from datetime import datetime
-from functions.whatsapp_bot_function import (
+from whatsapp_bot_function import (
     main,
     _extract_message_details,
     _load_conversation_context,
@@ -21,7 +21,7 @@ class TestWhatsAppBotFunction:
     def setup_method(self):
         """Set up test fixtures."""
         self.mock_event = Mock()
-        self.mock_event.event_type = "Microsoft.Communication.SMSReceived"
+        self.mock_event.event_type = "Microsoft.Communication.AdvancedMessageReceived"
         self.mock_event.get_json.return_value = {
             "data": {
                 "from": "+1234567890",
@@ -30,13 +30,16 @@ class TestWhatsAppBotFunction:
             }
         }
     
-    @patch('functions.whatsapp_bot_function._extract_message_details')
-    @patch('functions.whatsapp_bot_function._load_conversation_context')
-    @patch('functions.whatsapp_bot_function._generate_ai_response')
-    @patch('functions.whatsapp_bot_function._send_whatsapp_response')
-    @patch('functions.whatsapp_bot_function._save_conversation')
-    def test_main_successful_processing(self, mock_save, mock_send, mock_generate, mock_load, mock_extract):
+    @patch('whatsapp_bot_function._extract_message_details')
+    @patch('whatsapp_bot_function._load_conversation_context')
+    @patch('whatsapp_bot_function._generate_ai_response')
+    @patch('whatsapp_bot_function.acs_service')
+    @patch('whatsapp_bot_function._save_conversation')
+    @patch('services.acs_service.NotificationMessagesClient')
+    def test_main_successful_processing(self, mock_client, mock_save, mock_acs_service, mock_generate, mock_load, mock_extract):
         """Test successful message processing."""
+        import os
+        from unittest.mock import patch as patch_mock, Mock
         # Arrange
         mock_extract.return_value = {
             "from_number": "+1234567890",
@@ -45,16 +48,16 @@ class TestWhatsAppBotFunction:
         }
         mock_load.return_value = []
         mock_generate.return_value = "I'm doing well, thank you for asking!"
-        mock_send.return_value = "msg_12345"
-        
-        # Act
-        main(self.mock_event)
-        
+        mock_acs_service.send_whatsapp_text_message.return_value = "msg_12345"
+        mock_client.from_connection_string.return_value.send.return_value.receipts = [Mock(message_id="msg_12345")]
+        with patch_mock.dict(os.environ, {"COMMUNICATION_SERVICES_CONNECTION_STRING": "endpoint=https://test/;accesskey=YWJjZA==", "WHATSAPP_CHANNEL_ID_GUID": "test-channel-id"}):
+            # Act
+            main(self.mock_event)
         # Assert
         mock_extract.assert_called_once()
-        mock_load.assert_called_once_with("whatsapp_+1234567890")
+        mock_load.assert_called_once()
         mock_generate.assert_called_once()
-        mock_send.assert_called_once()
+        mock_acs_service.send_whatsapp_text_message.assert_called_once()
         mock_save.assert_called_once()
     
     def test_main_skip_non_sms_event(self):
@@ -65,7 +68,7 @@ class TestWhatsAppBotFunction:
         # Act & Assert
         main(self.mock_event)  # Should not raise any exceptions
     
-    @patch('functions.whatsapp_bot_function._extract_message_details')
+    @patch('whatsapp_bot_function._extract_message_details')
     def test_main_extract_failure(self, mock_extract):
         """Test handling of message extraction failure."""
         # Arrange
@@ -121,7 +124,7 @@ class TestWhatsAppBotFunction:
         # Assert
         assert result is None
     
-    @patch('functions.whatsapp_bot_function.azure_blob_service')
+    @patch('whatsapp_bot_function.azure_blob_service')
     def test_load_conversation_context_existing(self, mock_blob_service):
         """Test loading existing conversation context."""
         # Arrange
@@ -140,7 +143,7 @@ class TestWhatsAppBotFunction:
         assert len(result) == 2
         mock_blob_service.load_conversation.assert_called_once_with("test_conversation")
     
-    @patch('functions.whatsapp_bot_function.azure_blob_service')
+    @patch('whatsapp_bot_function.azure_blob_service')
     def test_load_conversation_context_not_found(self, mock_blob_service):
         """Test loading conversation context when not found."""
         # Arrange
@@ -152,7 +155,7 @@ class TestWhatsAppBotFunction:
         # Assert
         assert result == []
     
-    @patch('functions.whatsapp_bot_function.openai_service')
+    @patch('whatsapp_bot_function.openai_service')
     def test_generate_ai_response_success(self, mock_openai_service):
         """Test successful AI response generation."""
         # Arrange
@@ -165,7 +168,7 @@ class TestWhatsAppBotFunction:
         assert result == "AI response"
         mock_openai_service.generate_chat_response_with_context.assert_called_once()
     
-    @patch('functions.whatsapp_bot_function.openai_service')
+    @patch('whatsapp_bot_function.openai_service')
     def test_generate_ai_response_failure(self, mock_openai_service):
         """Test AI response generation failure."""
         # Arrange
@@ -177,24 +180,24 @@ class TestWhatsAppBotFunction:
         # Assert
         assert result is None
     
-    @patch('functions.whatsapp_bot_function.acs_service')
+    @patch('whatsapp_bot_function.acs_service')
     def test_send_whatsapp_response_success(self, mock_acs_service):
         """Test successful WhatsApp message sending."""
         # Arrange
-        mock_acs_service.send_whatsapp_message.return_value = "msg_12345"
+        mock_acs_service.send_whatsapp_text_message.return_value = "msg_12345"
         
         # Act
         result = _send_whatsapp_response("+1234567890", "Test message")
         
         # Assert
         assert result == "msg_12345"
-        mock_acs_service.send_whatsapp_message.assert_called_once_with("+1234567890", "Test message")
+        mock_acs_service.send_whatsapp_text_message.assert_called_once_with("+1234567890", "Test message")
     
-    @patch('functions.whatsapp_bot_function.acs_service')
+    @patch('whatsapp_bot_function.acs_service')
     def test_send_whatsapp_response_failure(self, mock_acs_service):
         """Test WhatsApp message sending failure."""
         # Arrange
-        mock_acs_service.send_whatsapp_message.return_value = None
+        mock_acs_service.send_whatsapp_text_message.return_value = None
         
         # Act
         result = _send_whatsapp_response("+1234567890", "Test message")
@@ -202,7 +205,7 @@ class TestWhatsAppBotFunction:
         # Assert
         assert result is None
     
-    @patch('functions.whatsapp_bot_function.azure_blob_service')
+    @patch('whatsapp_bot_function.azure_blob_service')
     def test_save_conversation_success(self, mock_blob_service):
         """Test successful conversation saving."""
         # Arrange
@@ -221,7 +224,7 @@ class TestWhatsAppBotFunction:
         assert saved_messages[-2]["role"] == "user"
         assert saved_messages[-1]["role"] == "assistant"
     
-    @patch('functions.whatsapp_bot_function.azure_blob_service')
+    @patch('whatsapp_bot_function.azure_blob_service')
     def test_save_conversation_new_conversation(self, mock_blob_service):
         """Test saving conversation for new conversation."""
         # Arrange

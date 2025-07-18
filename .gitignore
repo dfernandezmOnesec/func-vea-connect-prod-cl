@@ -34,7 +34,7 @@ env.bak/
 venv.bak/
 
 # IDE
-.vscode/
+
 .idea/
 *.swp
 *.swo
@@ -60,3 +60,4 @@ host.json.local
 # Temporary files
 *.tmp
 *.temp 
+.python_packages
